@@ -2,11 +2,11 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "簡易收據系統｜香港普通收據",
-  description: "建立香港普通收據，並直接列印或儲存為 PDF。",
+  title: "RE-Biz｜商務與帳務管理",
+  description: "RE-Biz 商務與帳務管理系統：建立、列印及儲存收據。",
   icons: {
-    icon: "/favicon.svg",
-    shortcut: "/favicon.svg",
+    icon: "/re-biz-mark.svg",
+    shortcut: "/re-biz-mark.svg",
   },
 };
 
