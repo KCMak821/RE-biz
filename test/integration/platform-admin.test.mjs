@@ -213,6 +213,8 @@ test("workspace feature flags block APIs and allow them again after re-enabling"
   const receiptReadAfterEnable = await request("/api/receipts", { token: fixture.userAToken });
   assert.equal(receiptReadAfterEnable.response.status, 200);
   await features.updateOne({ organizationId: fixture.workspaceAId, featureKey: "quotations" }, { $set: { enabled: true, updatedAt: new Date() } });
+  const quotationReadAfterEnable = await request("/api/quotes", { token: fixture.userAToken });
+  assert.equal(quotationReadAfterEnable.response.status, 200);
 });
 
 test("disabled users cannot continue using an existing session", { concurrency: false }, async () => {
