@@ -542,6 +542,7 @@ function QuoteEditor({
       ? {
           customer: { ...blankCustomer(), ...initial.customerSnapshot },
           customerId: initial.customerId ?? "",
+          customerEdited: false,
           customerSelected: false,
           issueDate: initial.issueDate,
           lines: initial.lines.map((line) => ({
@@ -555,7 +556,7 @@ function QuoteEditor({
           terms: initial.terms,
           validUntil: initial.validUntil,
         }
-      : { ...blankQuote(), customerSelected: false },
+      : { ...blankQuote(), customerEdited: false, customerSelected: false },
   );
   const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
@@ -574,6 +575,7 @@ function QuoteEditor({
       ...current,
       customer: customer ?? blankCustomer(),
       customerId: id,
+      customerEdited: false,
       customerSelected: Boolean(id),
     }));
   }
@@ -598,6 +600,7 @@ function QuoteEditor({
         ...current,
         customer,
         customerId: customer.id,
+        customerEdited: false,
         customerSelected: true,
       }));
       setMessage("已新增並選取此客戶。 ");
@@ -706,6 +709,7 @@ function QuoteEditor({
                   ...current,
                   customer: { ...current.customer, name: value },
                   customerId: "",
+                  customerEdited: true,
                   customerSelected: false,
                 }))
               }
@@ -718,6 +722,7 @@ function QuoteEditor({
                   ...current,
                   customer: { ...current.customer, companyName: value },
                   customerId: "",
+                  customerEdited: true,
                   customerSelected: false,
                 }))
               }
@@ -730,6 +735,7 @@ function QuoteEditor({
                   ...current,
                   customer: { ...current.customer, contact: value },
                   customerId: "",
+                  customerEdited: true,
                   customerSelected: false,
                 }))
               }
@@ -742,6 +748,7 @@ function QuoteEditor({
                   ...current,
                   customer: { ...current.customer, phone: value },
                   customerId: "",
+                  customerEdited: true,
                   customerSelected: false,
                 }))
               }
@@ -755,6 +762,7 @@ function QuoteEditor({
                   ...current,
                   customer: { ...current.customer, email: value },
                   customerId: "",
+                  customerEdited: true,
                   customerSelected: false,
                 }))
               }
@@ -770,6 +778,7 @@ function QuoteEditor({
                     businessRegistration: value,
                   },
                   customerId: "",
+                  customerEdited: true,
                   customerSelected: false,
                 }))
               }
@@ -783,6 +792,7 @@ function QuoteEditor({
                   ...current,
                   customer: { ...current.customer, address: value },
                   customerId: "",
+                  customerEdited: true,
                   customerSelected: false,
                 }))
               }
@@ -796,6 +806,7 @@ function QuoteEditor({
                   ...current,
                   customer: { ...current.customer, notes: value },
                   customerId: "",
+                  customerEdited: true,
                   customerSelected: false,
                 }))
               }

@@ -461,6 +461,13 @@ test(
     });
     assert.equal(edit.response.status, 200);
     assert.equal(edit.body.quote.customerSnapshot.address, "Address A");
+    const reselected = await request(`/api/quotes/${quoteId}`, {
+      body: quotePayload(id, { customerSelected: true }),
+      method: "PUT",
+      token: fixture.ownerToken,
+    });
+    assert.equal(reselected.response.status, 200);
+    assert.equal(reselected.body.quote.customerSnapshot.address, "Address B");
     assert.equal(
       (
         await request(`/api/customers/${id}`, {
@@ -484,6 +491,52 @@ test(
       }),
       0,
     );
+  },
+);
+
+test(
+  "Manual customer quote edits update only its customer snapshot",
+  { concurrency: false },
+  async () => {
+    const created = await request("/api/quotes", {
+      body: quotePayload(undefined, {
+        customer: customerPayload({
+          address: "Manual Address A",
+          name: "Manual Customer",
+        }),
+      }),
+      method: "POST",
+      token: fixture.ownerToken,
+    });
+    assert.equal(created.response.status, 201);
+    assert.equal(created.body.quote.customerId, undefined);
+    assert.equal(
+      created.body.quote.customerSnapshot.address,
+      "Manual Address A",
+    );
+    const updated = await request(`/api/quotes/${created.body.quote.id}`, {
+      body: quotePayload(undefined, {
+        customer: customerPayload({
+          address: "Manual Address B",
+          name: "Manual Customer",
+        }),
+        customerEdited: true,
+      }),
+      method: "PUT",
+      token: fixture.ownerToken,
+    });
+    assert.equal(updated.response.status, 200);
+    assert.equal(updated.body.quote.customerId, undefined);
+    assert.equal(
+      updated.body.quote.customerSnapshot.address,
+      "Manual Address B",
+    );
+    const read = await request(`/api/quotes/${created.body.quote.id}`, {
+      token: fixture.ownerToken,
+    });
+    assert.equal(read.response.status, 200);
+    assert.equal(read.body.quote.customerId, undefined);
+    assert.equal(read.body.quote.customerSnapshot.address, "Manual Address B");
   },
 );
 
@@ -535,6 +588,66 @@ test(
       !detail.body.quotations.some(
         (quote) => quote.id === quoteB.body.quote.id,
       ),
+    );
+  },
+);
+
+test(
+  "Customer related quotations respect the current quote owner's createdBy scope",
+  { concurrency: false },
+  async () => {
+    const customer = (
+      await request("/api/customers", {
+        body: customerPayload({ name: "Private related quote customer" }),
+        method: "POST",
+        token: fixture.ownerToken,
+      })
+    ).body.customer;
+    const ownerQuote = await request("/api/quotes", {
+      body: quotePayload(customer.id),
+      method: "POST",
+      token: fixture.ownerToken,
+    });
+    const operatorQuote = await request("/api/quotes", {
+      body: quotePayload(customer.id),
+      method: "POST",
+      token: fixture.operatorToken,
+    });
+    assert.equal(ownerQuote.response.status, 201);
+    assert.equal(operatorQuote.response.status, 201);
+
+    const ownerDetail = await request(`/api/customers/${customer.id}`, {
+      token: fixture.ownerToken,
+    });
+    assert.equal(ownerDetail.response.status, 200);
+    assert.deepEqual(
+      ownerDetail.body.quotations.map((quote) => quote.id),
+      [ownerQuote.body.quote.id],
+    );
+    assert.equal(
+      (
+        await request(`/api/quotes/${ownerQuote.body.quote.id}`, {
+          token: fixture.ownerToken,
+        })
+      ).response.status,
+      200,
+    );
+
+    const operatorDetail = await request(`/api/customers/${customer.id}`, {
+      token: fixture.operatorToken,
+    });
+    assert.equal(operatorDetail.response.status, 200);
+    assert.deepEqual(
+      operatorDetail.body.quotations.map((quote) => quote.id),
+      [operatorQuote.body.quote.id],
+    );
+    assert.equal(
+      (
+        await request(`/api/quotes/${operatorQuote.body.quote.id}`, {
+          token: fixture.operatorToken,
+        })
+      ).response.status,
+      200,
     );
   },
 );

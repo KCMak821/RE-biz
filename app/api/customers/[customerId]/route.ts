@@ -56,7 +56,11 @@ export async function GET(
       await quotesCollection()
     )
       .find(
-        { organizationId: new ObjectId(user.organization.id), customerId: id },
+        {
+          organizationId: new ObjectId(user.organization.id),
+          customerId: id,
+          createdBy: new ObjectId(user.id),
+        },
         {
           projection: {
             issueDate: 1,

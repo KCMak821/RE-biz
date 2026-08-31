@@ -76,6 +76,8 @@ export const quotePayloadSchema = z
     // Sent only by the editor when a saved customer is deliberately selected
     // again. This prevents ordinary quote edits from refreshing its snapshot.
     customerSelected: z.boolean().optional(),
+    // Marks a direct edit to a manual customer snapshot on an existing quote.
+    customerEdited: z.boolean().optional(),
     issueDate: z.string().date(),
     lines: z.array(quoteLineSchema).min(1).max(100),
     notes: z.string().trim().max(4000).default(""),

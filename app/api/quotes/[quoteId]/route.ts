@@ -182,10 +182,13 @@ export async function PUT(
     const existingCustomerId = quote.customerId?.toHexString();
     const customerChanged =
       (input.customerId ?? undefined) !== existingCustomerId;
-    // A normal draft edit must keep its saved customer snapshot. The UI marks a
-    // deliberate selection with customerSelected; changing to/manual customer
-    // is also necessarily a snapshot change.
-    const refreshCustomer = customerChanged || input.customerSelected === true;
+    // A normal draft edit must keep its saved customer snapshot. A deliberate
+    // saved-customer selection refreshes it, while a direct manual-customer
+    // edit stores the validated request snapshot without querying Customer.
+    const refreshCustomer =
+      customerChanged ||
+      input.customerSelected === true ||
+      input.customerEdited === true;
     const resolved = refreshCustomer
       ? await resolveQuotePayload(user, input)
       : {
