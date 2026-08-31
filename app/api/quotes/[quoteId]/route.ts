@@ -11,6 +11,7 @@ import {
 } from "@/lib/quotation";
 import { canUseWorkspaceFeature } from "@/lib/platform-admin";
 import { receiptsCollection } from "@/lib/receipt-store";
+import { invoicesCollection } from "@/lib/invoice-store";
 import {
   quotesCollection,
   resolveQuotePayload,
@@ -39,6 +40,7 @@ function serialize(document: QuoteDocument & { _id: ObjectId }) {
     customerSnapshot: document.customerSnapshot,
     id: document._id.toHexString(),
     issueDate: document.issueDate,
+    invoiceId: document.invoiceId?.toHexString(),
     lines: document.lines,
     notes: document.notes,
     quoteNumber: document.quoteNumber,
@@ -95,6 +97,9 @@ export async function GET(
           organizationId: new ObjectId(user.organization.id),
           createdBy: new ObjectId(user.id),
         });
+    const invoice = quote.invoiceId
+      ? await (await invoicesCollection()).findOne({ _id: quote.invoiceId, organizationId: new ObjectId(user.organization.id), createdBy: new ObjectId(user.id) })
+      : await (await invoicesCollection()).findOne({ sourceQuoteId: id, organizationId: new ObjectId(user.organization.id), createdBy: new ObjectId(user.id) });
     return Response.json({
       quote: serialize(quote),
       receipt: receipt
@@ -104,6 +109,7 @@ export async function GET(
             receiptNumber: receipt.receiptNumber,
           }
         : null,
+      invoice: invoice ? { id: invoice._id.toHexString(), invoiceNumber: invoice.invoiceNumber } : null,
     });
   } catch {
     return Response.json({ message: "無法讀取報價單。" }, { status: 503 });

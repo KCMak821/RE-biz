@@ -63,6 +63,7 @@ type Quote = {
   notes: string;
   quoteNumber: string;
   receiptId?: string;
+  invoiceId?: string;
   status: "draft" | "sent" | "accepted" | "rejected" | "expired";
   storedStatus: "draft" | "sent" | "accepted" | "rejected";
   terms: string;
@@ -75,6 +76,7 @@ type ReceiptLink = {
   paymentStatus: "pending" | "paid";
   receiptNumber: string;
 } | null;
+type InvoiceLink = { id: string; invoiceNumber: string } | null;
 type Screen = "list" | "editor" | "detail" | "customers" | "items" | "company";
 
 const today = new Date().toISOString().slice(0, 10);
@@ -178,12 +180,14 @@ export function QuotationWorkspace({
   organization,
   onOrganizationUpdated,
   onOpenReceipts,
+  onOpenInvoices,
 }: {
   canManage: boolean;
   canManageCompany: boolean;
   organization: Organization;
   onOrganizationUpdated: (organization: Organization) => void;
   onOpenReceipts: () => void;
+  onOpenInvoices: () => void;
 }) {
   const [screen, setScreen] = useState<Screen>("list");
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -191,6 +195,7 @@ export function QuotationWorkspace({
   const [quotes, setQuotes] = useState<Quote[]>([]);
   const [selected, setSelected] = useState<Quote | null>(null);
   const [receipt, setReceipt] = useState<ReceiptLink>(null);
+  const [invoice, setInvoice] = useState<InvoiceLink>(null);
   const [keyword, setKeyword] = useState("");
   const [status, setStatus] = useState("all");
   const [message, setMessage] = useState("");
@@ -205,11 +210,12 @@ export function QuotationWorkspace({
   }
   async function openQuote(id: string) {
     try {
-      const data = await request<{ quote: Quote; receipt: ReceiptLink }>(
+      const data = await request<{ quote: Quote; receipt: ReceiptLink; invoice: InvoiceLink }>(
         `/api/quotes/${id}`,
       );
       setSelected(data.quote);
       setReceipt(data.receipt);
+      setInvoice(data.invoice);
       setScreen("detail");
       setMessage("");
     } catch (error) {
@@ -285,21 +291,14 @@ export function QuotationWorkspace({
       setMessage(error instanceof Error ? error.message : "無法更新狀態。");
     }
   }
-  async function createReceiptDraft() {
+  async function createInvoice() {
     if (!selected) return;
     try {
-      const data = await request<{ receipt: NonNullable<ReceiptLink> }>(
-        `/api/quotes/${selected.id}/receipt`,
-        { method: "POST" },
-      );
-      setReceipt(data.receipt);
-      setSelected((current) =>
-        current ? { ...current, receiptId: data.receipt.id } : current,
-      );
-      setMessage("已建立待收款的收據草稿；確認收款前不會列為收入。");
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "無法建立收據草稿。");
-    }
+      const data = await request<{ invoice: NonNullable<InvoiceLink> }>(`/api/quotes/${selected.id}/invoice`, { method: "POST" });
+      setInvoice(data.invoice);
+      setSelected((current) => current ? { ...current, invoiceId: data.invoice.id } : current);
+      setMessage(`已建立請款單 ${data.invoice.invoiceNumber}。`);
+    } catch (error) { setMessage(error instanceof Error ? error.message : "無法建立請款單。"); }
   }
 
   if (screen === "editor")
@@ -331,16 +330,18 @@ export function QuotationWorkspace({
       <QuoteDetail
         quote={selected}
         receipt={receipt}
+        invoice={invoice}
         canManage={canManage}
         message={message}
         onBack={() => setScreen("list")}
-        onCreateReceipt={() => void createReceiptDraft()}
+        onCreateInvoice={() => void createInvoice()}
         onDuplicate={() => void duplicateQuote()}
         onEdit={() => {
           setScreen("editor");
           setMessage("");
         }}
         onOpenReceipts={onOpenReceipts}
+        onOpenInvoices={onOpenInvoices}
         onStatus={(next) => void changeStatus(next)}
       />
     );
@@ -1059,24 +1060,28 @@ function QuoteDetail({
   canManage,
   message,
   onBack,
-  onCreateReceipt,
+  onCreateInvoice,
   onDuplicate,
   onEdit,
   onOpenReceipts,
+  onOpenInvoices,
   onStatus,
   quote,
   receipt,
+  invoice,
 }: {
   canManage: boolean;
   message: string;
   onBack: () => void;
-  onCreateReceipt: () => void;
+  onCreateInvoice: () => void;
   onDuplicate: () => void;
   onEdit: () => void;
   onOpenReceipts: () => void;
+  onOpenInvoices: () => void;
   onStatus: (status: "sent" | "accepted" | "rejected") => void;
   quote: Quote;
   receipt: ReceiptLink;
+  invoice: InvoiceLink;
 }) {
   return (
     <section className="page-view quote-detail">
@@ -1146,15 +1151,16 @@ function QuoteDetail({
               </button>
             </>
           )}
-          {quote.status === "accepted" && !receipt && (
+          {quote.status === "accepted" && !invoice && (
             <button
               className="primary-action quote-receipt-action"
               type="button"
-              onClick={onCreateReceipt}
+              onClick={onCreateInvoice}
             >
-              建立收據草稿（待收款）
+              轉為請款單
             </button>
           )}
+          {invoice && <button className="secondary-action quote-receipt-action" type="button" onClick={onOpenInvoices}>已建立請款單：{invoice.invoiceNumber}</button>}
           {receipt && (
             <button
               className="secondary-action quote-receipt-action"

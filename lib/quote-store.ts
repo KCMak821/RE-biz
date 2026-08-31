@@ -35,6 +35,7 @@ export type QuoteDocument = {
   organizationId: ObjectId;
   quoteNumber: string;
   receiptId?: ObjectId;
+  invoiceId?: ObjectId;
   status: Exclude<QuoteStatus, "expired">;
   terms: string;
   totalAmount: number;

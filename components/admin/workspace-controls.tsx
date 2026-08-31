@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-type Feature = { enabled: boolean; featureKey: "receipts" | "accounting" | "quotations" };
+type Feature = { enabled: boolean; featureKey: "receipts" | "accounting" | "quotations" | "invoices" };
 
 export function WorkspaceControls({ features, status, workspaceId }: { features: Feature[]; status: "active" | "suspended"; workspaceId: string }) {
   const router = useRouter();

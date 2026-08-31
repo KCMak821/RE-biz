@@ -3,7 +3,7 @@ import { ObjectId } from "mongodb";
 import { getCurrentPlatformAdmin, type AccountStatus, type OrganizationDocument, type PlatformAdminActor, type PlatformRole, type UserDocument, type WorkspaceStatus } from "@/lib/auth";
 import { getDatabase } from "@/lib/mongodb";
 
-export const workspaceFeatureKeys = ["receipts", "accounting", "quotations"] as const;
+export const workspaceFeatureKeys = ["receipts", "accounting", "quotations", "invoices"] as const;
 export type WorkspaceFeatureKey = typeof workspaceFeatureKeys[number];
 export const platformAuditActions = [
   "WORKSPACE_SUSPENDED",

@@ -20,6 +20,7 @@ function serialize(document: QuoteDocument & { _id: ObjectId }) {
     customerSnapshot: document.customerSnapshot,
     id: document._id.toHexString(),
     issueDate: document.issueDate,
+    invoiceId: document.invoiceId?.toHexString(),
     lines: document.lines,
     notes: document.notes,
     quoteNumber: document.quoteNumber,

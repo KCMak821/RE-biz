@@ -10,6 +10,7 @@ import { type ChangeEvent, type CSSProperties, FormEvent, useEffect, useMemo, us
 
 import { defaultReceiptTemplate, receiptTemplatePresets, type ReceiptTemplate } from "@/lib/receipt-template";
 import { QuotationWorkspace } from "@/components/quotation-workspace";
+import { InvoiceWorkspace } from "@/components/invoice-workspace";
 
 type ReceiptForm = {
   receiptNumber: string;
@@ -38,7 +39,7 @@ type ReceiptLineItem = {
 };
 type BatchReceipt = ReceiptForm & { sourceLine: number };
 type Mode = "single" | "batch";
-type AppView = "dashboard" | "receipts" | "ledger" | "create" | "members" | "appearance" | "quotes";
+type AppView = "dashboard" | "receipts" | "ledger" | "create" | "members" | "appearance" | "quotes" | "invoices";
 type AuthMode = "loading" | "login" | "register" | "authenticated" | "unavailable";
 type SavedReceipt = {
   amount: number;
@@ -591,6 +592,7 @@ export default function Home() {
             <button className={appView === "ledger" ? "active" : ""} type="button" onClick={() => setAppView("ledger")}><BookOpenText size={17} aria-hidden="true" />收支記帳</button>
             <button className={appView === "receipts" ? "active" : ""} type="button" onClick={() => setAppView("receipts")}><ReceiptText size={17} aria-hidden="true" />收據中心</button>
             <button className={appView === "quotes" ? "active" : ""} type="button" onClick={() => setAppView("quotes")}><FileSignature size={17} aria-hidden="true" />報價單</button>
+            <button className={appView === "invoices" ? "active" : ""} type="button" onClick={() => setAppView("invoices")}><FileText size={17} aria-hidden="true" />請款單</button>
             {user.organization.role !== "viewer" && <button className={appView === "create" ? "active" : ""} type="button" onClick={startReceipt}><Plus size={17} aria-hidden="true" />新增收據</button>}
           </nav>
           {(user.organization.role === "owner" || user.organization.role === "admin") && <><p className="sidebar-label sidebar-label-settings">設定</p><nav className="sidebar-nav"><button className={appView === "members" ? "active" : ""} type="button" onClick={() => setAppView("members")}><UsersRound size={17} aria-hidden="true" />成員與權限</button><button className={appView === "appearance" ? "active" : ""} type="button" onClick={() => setAppView("appearance")}><Palette size={17} aria-hidden="true" />收據樣式</button></nav></>}
@@ -602,7 +604,8 @@ export default function Home() {
           {appView === "dashboard" && <DashboardView receipts={savedReceipts} user={user} onCreate={startReceipt} />}
           {appView === "ledger" && <LedgerView canCreate={user.organization.role !== "viewer"} currency={user.organization.currency} entries={ledgerEntries} onSave={saveLedgerEntry} summary={ledgerSummary} />}
           {appView === "receipts" && <ReceiptsView currency={user.organization.currency} receipts={savedReceipts} canCreate={user.organization.role !== "viewer"} onConfirmPayment={confirmReceiptPayment} onCreate={startReceipt} onPrint={printSavedReceipt} />}
-          {appView === "quotes" && <QuotationWorkspace canManage={user.organization.role !== "viewer"} canManageCompany={user.organization.role === "owner" || user.organization.role === "admin"} organization={user.organization} onOpenReceipts={() => setAppView("receipts")} onOrganizationUpdated={(organization) => setUser((current) => current ? { ...current, organization: { ...current.organization, ...organization } } : current)} />}
+          {appView === "quotes" && <QuotationWorkspace canManage={user.organization.role !== "viewer"} canManageCompany={user.organization.role === "owner" || user.organization.role === "admin"} organization={user.organization} onOpenReceipts={() => setAppView("receipts")} onOpenInvoices={() => setAppView("invoices")} onOrganizationUpdated={(organization) => setUser((current) => current ? { ...current, organization: { ...current.organization, ...organization } } : current)} />}
+          {appView === "invoices" && <InvoiceWorkspace canManage={user.organization.role !== "viewer"} currency={user.organization.currency} />}
           {appView === "members" && (user.organization.role === "owner" || user.organization.role === "admin") && <section className="page-view no-print"><MemberManagement actorId={user.id} actorRole={user.organization.role} allowAdmin={user.organization.role === "owner"} onClose={() => setAppView("dashboard")} /></section>}
           {appView === "appearance" && (user.organization.role === "owner" || user.organization.role === "admin") && <ReceiptAppearanceSettings currency={user.organization.currency} logoUrl={companyLogoUrl} sealUrl={companySealUrl} organization={user.organization} onClose={() => setAppView("dashboard")} onSave={saveReceiptTemplate} onSealUploaded={markSealUploaded} />}
           {appView === "create" && <section className="workspace">
