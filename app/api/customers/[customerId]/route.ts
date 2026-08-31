@@ -1,7 +1,7 @@
 import { ObjectId } from "mongodb";
 
 import { canManageRecords, getCurrentUser } from "@/lib/auth";
-import { customersCollection, type CustomerDocument } from "@/app/api/customers/route";
+import { customersCollection, type CustomerDocument } from "@/lib/customer-store";
 import { customerFieldsSchema } from "@/lib/quotation";
 import { canUseWorkspaceFeature } from "@/lib/platform-admin";
 

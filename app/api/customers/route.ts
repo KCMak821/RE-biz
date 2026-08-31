@@ -1,27 +1,11 @@
 import { ObjectId } from "mongodb";
 
 import { canManageRecords, getCurrentUser } from "@/lib/auth";
-import { customerFieldsSchema, type CustomerFields } from "@/lib/quotation";
-import { getDatabase } from "@/lib/mongodb";
+import { customersCollection, type CustomerDocument } from "@/lib/customer-store";
 import { canUseWorkspaceFeature } from "@/lib/platform-admin";
+import { customerFieldsSchema } from "@/lib/quotation";
 
 export const runtime = "nodejs";
-
-export type CustomerDocument = CustomerFields & {
-  createdAt: Date;
-  createdBy: ObjectId;
-  organizationId: ObjectId;
-  updatedAt: Date;
-};
-
-export async function customersCollection() {
-  const collection = (await getDatabase()).collection<CustomerDocument>("customers");
-  await Promise.all([
-    collection.createIndex({ organizationId: 1, createdBy: 1, name: 1 }),
-    collection.createIndex({ organizationId: 1, createdBy: 1, updatedAt: -1 }),
-  ]);
-  return collection;
-}
 
 function serialize(document: CustomerDocument & { _id: ObjectId }) {
   return { ...document, createdAt: document.createdAt.toISOString(), id: document._id.toHexString(), updatedAt: document.updatedAt.toISOString(), _id: undefined, createdBy: undefined, organizationId: undefined };

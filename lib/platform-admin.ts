@@ -221,9 +221,10 @@ async function writePlatformAuditLogBestEffort(input: Omit<PlatformAuditLogDocum
   } catch (error) {
     // The local MongoDB deployment is a standalone server, so transactions
     // cannot be assumed. The business mutation is the source of truth: never
-    // report it as failed solely because its non-sensitive audit write failed.
-    const reason = error instanceof Error ? error.message : "Unknown audit write error";
-    console.error(`Platform audit log write failed after a successful mutation: action=${input.action} targetType=${input.targetType} targetId=${input.targetId} reason=${reason}`);
+    // report it as failed solely because its audit write failed. Driver error
+    // messages can contain request context, so log only a stable error type.
+    const errorType = error instanceof Error ? error.name : typeof error;
+    console.error(`Platform audit log write failed after a successful mutation: action=${input.action} targetType=${input.targetType} targetId=${input.targetId} errorType=${errorType}`);
   }
 }
 

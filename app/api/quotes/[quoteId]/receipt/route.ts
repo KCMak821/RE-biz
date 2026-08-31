@@ -2,9 +2,9 @@ import { ObjectId } from "mongodb";
 
 import { canManageRecords, getCurrentUser } from "@/lib/auth";
 import { quoteEffectiveStatus } from "@/lib/quotation";
-import { quotesCollection } from "@/app/api/quotes/route";
 import { nextReceiptNumbers, receiptsCollection, type ReceiptDocument } from "@/lib/receipt-store";
 import { canUseWorkspaceFeature } from "@/lib/platform-admin";
+import { quotesCollection } from "@/lib/quote-store";
 
 export const runtime = "nodejs";
 

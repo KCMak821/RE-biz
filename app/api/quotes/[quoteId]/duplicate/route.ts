@@ -1,8 +1,8 @@
 import { ObjectId } from "mongodb";
 
 import { canManageRecords, getCurrentUser } from "@/lib/auth";
-import { nextQuoteNumber, quotesCollection, type QuoteDocument } from "@/app/api/quotes/route";
 import { canUseWorkspaceFeature } from "@/lib/platform-admin";
+import { nextQuoteNumber, quotesCollection, type QuoteDocument } from "@/lib/quote-store";
 
 export const runtime = "nodejs";
 

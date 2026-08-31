@@ -4,8 +4,8 @@ import { z } from "zod";
 import { canManageRecords, getCurrentUser } from "@/lib/auth";
 import { quoteEffectiveStatus, quotePayloadSchema, type QuoteStatus } from "@/lib/quotation";
 import { canUseWorkspaceFeature } from "@/lib/platform-admin";
-import { quotesCollection, resolveQuotePayload, type QuoteDocument } from "@/app/api/quotes/route";
 import { receiptsCollection } from "@/lib/receipt-store";
+import { quotesCollection, resolveQuotePayload, type QuoteDocument } from "@/lib/quote-store";
 
 export const runtime = "nodejs";
 
