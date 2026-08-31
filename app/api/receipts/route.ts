@@ -34,12 +34,24 @@ export async function GET() {
     ]).toArray();
     return Response.json({
       descriptionSuggestions: descriptionSuggestions.map(({ _id }) => _id),
-      receipts: receipts.map(({ _id, amount, createdAt, issueDate, payerName, paymentStatus, receiptNumber, sourceQuoteId, sourceQuoteNumber }) => ({
+      receipts: receipts.map(({
+        _id, amount, businessRegistration, createdAt, description, issueDate, issuerAddress, issuerContact, issuerName,
+        lineItems, notes, payerAddress, payerName, paymentMethod, paymentStatus, receiptNumber, sourceQuoteId, sourceQuoteNumber,
+      }) => ({
         amount,
+        businessRegistration,
         createdAt: createdAt.toISOString(),
+        description,
         id: _id.toHexString(),
         issueDate,
+        issuerAddress,
+        issuerContact,
+        issuerName,
+        lineItems,
+        notes,
+        payerAddress,
         payerName,
+        paymentMethod,
         paymentStatus,
         receiptNumber,
         sourceQuoteId: sourceQuoteId?.toHexString(),

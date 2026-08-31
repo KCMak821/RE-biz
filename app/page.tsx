@@ -24,18 +24,37 @@ type ReceiptForm = {
   amount: string;
   paymentMethod: string;
   notes: string;
+  lineItems?: ReceiptLineItem[];
+  sourceQuoteNumber?: string;
 };
 
+type ReceiptLineItem = {
+  description: string;
+  discountAmount: number;
+  name: string;
+  quantity: number;
+  subtotal: number;
+  unitPrice: number;
+};
 type BatchReceipt = ReceiptForm & { sourceLine: number };
 type Mode = "single" | "batch";
 type AppView = "dashboard" | "receipts" | "ledger" | "create" | "members" | "appearance" | "quotes";
 type AuthMode = "loading" | "login" | "register" | "authenticated" | "unavailable";
 type SavedReceipt = {
   amount: number;
+  businessRegistration: string;
   createdAt: string;
+  description: string;
   id: string;
   issueDate: string;
+  issuerAddress: string;
+  issuerContact: string;
+  issuerName: string;
+  lineItems?: ReceiptLineItem[];
+  notes: string;
+  payerAddress: string;
   payerName: string;
+  paymentMethod: string;
   paymentStatus?: "pending" | "paid";
   receiptNumber: string;
   sourceQuoteId?: string;
@@ -109,6 +128,25 @@ function formatAmount(value: string) {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(amount);
+}
+
+function receiptFormFromSavedReceipt(receipt: SavedReceipt): ReceiptForm {
+  return {
+    amount: String(receipt.amount),
+    businessRegistration: receipt.businessRegistration,
+    description: receipt.description,
+    issueDate: receipt.issueDate,
+    issuerAddress: receipt.issuerAddress,
+    issuerContact: receipt.issuerContact,
+    issuerName: receipt.issuerName,
+    lineItems: receipt.lineItems,
+    notes: receipt.notes,
+    payerAddress: receipt.payerAddress,
+    payerName: receipt.payerName,
+    paymentMethod: receipt.paymentMethod,
+    receiptNumber: receipt.receiptNumber,
+    sourceQuoteNumber: receipt.sourceQuoteNumber,
+  };
 }
 
 function splitDelimitedLine(line: string, delimiter: string) {
@@ -212,6 +250,7 @@ export default function Home() {
   const [saveMessage, setSaveMessage] = useState("");
   const [savedReceiptVersion, setSavedReceiptVersion] = useState(0);
   const [savedReceipts, setSavedReceipts] = useState<SavedReceipt[]>([]);
+  const [receiptToPrint, setReceiptToPrint] = useState<SavedReceipt | null>(null);
   const [ledgerEntries, setLedgerEntries] = useState<LedgerEntry[]>([]);
   const [ledgerSummary, setLedgerSummary] = useState<LedgerSummary>({ balance: 0, expense: 0, income: 0 });
   const [ledgerVersion, setLedgerVersion] = useState(0);
@@ -281,6 +320,7 @@ export default function Home() {
 
   async function printReceipt(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setReceiptToPrint(null);
     setSubmitted(true);
     const required = [form.issuerName, form.payerName, form.description, form.amount];
     if (required.some((value) => !value.trim()) || !paymentMethodIsValid(form.paymentMethod)) return;
@@ -293,6 +333,7 @@ export default function Home() {
   }
 
   async function generateBatch() {
+    setReceiptToPrint(null);
     if (!form.issuerName.trim()) {
       setBatchError("請先填妥收款方名稱，這項資料會套用到每一張收據。");
       return;
@@ -397,6 +438,7 @@ export default function Home() {
     await fetch("/api/auth/logout", { method: "POST" });
     setUser(null);
     setSavedReceipts([]);
+    setReceiptToPrint(null);
     setLedgerEntries([]);
     setLedgerSummary({ balance: 0, expense: 0, income: 0 });
     setForm(newReceipt());
@@ -488,6 +530,11 @@ export default function Home() {
     setSaveMessage(`${receipt.receiptNumber} 已確認收款，並已列入收入。`);
   }
 
+  function printSavedReceipt(receipt: SavedReceipt) {
+    setReceiptToPrint(receipt);
+    window.setTimeout(() => window.print(), 80);
+  }
+
   const hasMissingRequired = [form.issuerName, form.payerName, form.description, form.amount]
     .some((value) => !value.trim()) || !paymentMethodIsValid(form.paymentMethod);
 
@@ -516,7 +563,7 @@ export default function Home() {
   const companySealUrl = user.organization.hasSealImage ? `/api/organization/seal?v=${encodeURIComponent(user.organization.sealUpdatedAt ?? user.organization.id)}` : undefined;
 
   return (
-    <main className={`app-shell ${batchReceipts.length ? "printing-batch" : ""}`}>
+    <main className={`app-shell ${batchReceipts.length ? "printing-batch" : ""} ${receiptToPrint ? "printing-saved-receipt" : ""}`}>
       <header className="topbar no-print">
         <div className="brand-lockup">
           <Image className="brand-mark" src="/re-biz-mark.svg" alt="RE-Biz" width={36} height={36} priority />
@@ -549,7 +596,7 @@ export default function Home() {
         <section className="app-content">
           {appView === "dashboard" && <DashboardView receipts={savedReceipts} user={user} onCreate={startReceipt} />}
           {appView === "ledger" && <LedgerView canCreate={user.organization.role !== "viewer"} currency={user.organization.currency} entries={ledgerEntries} onSave={saveLedgerEntry} summary={ledgerSummary} />}
-          {appView === "receipts" && <ReceiptsView currency={user.organization.currency} receipts={savedReceipts} canCreate={user.organization.role !== "viewer"} onConfirmPayment={confirmReceiptPayment} onCreate={startReceipt} />}
+          {appView === "receipts" && <ReceiptsView currency={user.organization.currency} receipts={savedReceipts} canCreate={user.organization.role !== "viewer"} onConfirmPayment={confirmReceiptPayment} onCreate={startReceipt} onPrint={printSavedReceipt} />}
           {appView === "quotes" && <QuotationWorkspace canManage={user.organization.role !== "viewer"} canManageCompany={user.organization.role === "owner" || user.organization.role === "admin"} organization={user.organization} onOpenReceipts={() => setAppView("receipts")} onOrganizationUpdated={(organization) => setUser((current) => current ? { ...current, organization: { ...current.organization, ...organization } } : current)} />}
           {appView === "members" && (user.organization.role === "owner" || user.organization.role === "admin") && <section className="page-view no-print"><MemberManagement actorId={user.id} actorRole={user.organization.role} allowAdmin={user.organization.role === "owner"} onClose={() => setAppView("dashboard")} /></section>}
           {appView === "appearance" && (user.organization.role === "owner" || user.organization.role === "admin") && <ReceiptAppearanceSettings currency={user.organization.currency} logoUrl={companyLogoUrl} sealUrl={companySealUrl} organization={user.organization} onClose={() => setAppView("dashboard")} onSave={saveReceiptTemplate} onSealUploaded={markSealUploaded} />}
@@ -677,6 +724,7 @@ export default function Home() {
       <section className="batch-print" aria-label="批量收據列印內容">
         {batchReceipts.map((receipt) => <ReceiptPaper currency={user.organization.currency} key={`${receipt.receiptNumber}-${receipt.sourceLine}`} logoUrl={companyLogoUrl} sealUrl={companySealUrl} receipt={receipt} template={user.organization.receiptTemplate} />)}
       </section>
+      {receiptToPrint && <section className="saved-receipt-print" aria-label="收據列印內容"><ReceiptPaper currency={user.organization.currency} logoUrl={companyLogoUrl} receipt={receiptFormFromSavedReceipt(receiptToPrint)} sealUrl={companySealUrl} template={user.organization.receiptTemplate} /></section>}
 
       <footer className="no-print">
         <span>RE-BIZ · HONG KONG</span>
@@ -934,10 +982,14 @@ function DashboardView({ receipts, user, onCreate }: { receipts: SavedReceipt[];
   </section>;
 }
 
-function ReceiptsView({ currency, receipts, canCreate, onConfirmPayment, onCreate }: { currency: string; receipts: SavedReceipt[]; canCreate: boolean; onConfirmPayment: (receipt: SavedReceipt) => void; onCreate: () => void }) {
+function ReceiptsView({ currency, receipts, canCreate, onConfirmPayment, onCreate, onPrint }: { currency: string; receipts: SavedReceipt[]; canCreate: boolean; onConfirmPayment: (receipt: SavedReceipt) => void; onCreate: () => void; onPrint: (receipt: SavedReceipt) => void }) {
   return <section className="page-view receipts-view no-print" aria-labelledby="receipts-title"><div className="page-heading"><div><p className="eyebrow">RECEIPT CENTER</p><h2 id="receipts-title">收據中心</h2><p>由報價單建立的收據草稿會先標示為待收款；確認收款後才會列為收入。</p></div>{canCreate && <button className="page-primary-action" type="button" onClick={onCreate}><Plus size={17} aria-hidden="true" />新增收據</button>}</div>
-    <section className="receipts-table-card">{receipts.length ? <div className="receipt-table-list receipt-table-with-status"><div className="receipt-table-header"><span>收據編號</span><span>付款人</span><span>開立日期</span><span>金額</span><span>收款狀態</span></div>{receipts.map((receipt) => <div className="receipt-table-row" key={receipt.id}><strong>{receipt.receiptNumber}{receipt.sourceQuoteNumber && <small className="ledger-source">來源：{receipt.sourceQuoteNumber}</small>}</strong><span>{receipt.payerName}</span><span>{receipt.issueDate}</span><b>{currency} {formatAmount(String(receipt.amount))}</b><span>{receipt.paymentStatus === "pending" ? <button className="text-button" type="button" onClick={() => onConfirmPayment(receipt)}>確認收款</button> : <em className="receipt-paid">已收款</em>}</span></div>)}</div> : <EmptyReceipts onCreate={onCreate} canCreate={canCreate} />}</section>
+    <section className="receipts-table-card">{receipts.length ? <div className="receipt-table-list receipt-table-with-status"><div className="receipt-table-header"><span>收據編號</span><span>付款人</span><span>開立日期</span><span>金額</span><span>收款狀態</span></div>{receipts.map((receipt) => <div className="receipt-list-entry" key={receipt.id}><div className="receipt-table-row"><strong>{receipt.receiptNumber}{receipt.sourceQuoteNumber && <small className="ledger-source">來源：{receipt.sourceQuoteNumber}</small>}</strong><span>{receipt.payerName}</span><span>{receipt.issueDate}</span><b>{currency} {formatAmount(String(receipt.amount))}</b><span>{receipt.paymentStatus === "pending" ? canCreate ? <button className="text-button" type="button" onClick={() => onConfirmPayment(receipt)}>確認收款</button> : <em className="receipt-pending">待收款</em> : <em className="receipt-paid">已收款</em>}</span></div>{receipt.lineItems?.length ? <details className="receipt-line-details"><summary>查看 {receipt.lineItems.length} 項報價明細</summary><ReceiptLineItemsDetail currency={currency} lineItems={receipt.lineItems} onPrint={() => onPrint(receipt)} /></details> : null}</div>)}</div> : <EmptyReceipts onCreate={onCreate} canCreate={canCreate} />}</section>
   </section>;
+}
+
+function ReceiptLineItemsDetail({ currency, lineItems, onPrint }: { currency: string; lineItems: ReceiptLineItem[]; onPrint: () => void }) {
+  return <div className="receipt-line-detail-content"><div className="receipt-line-detail-actions"><span>完整品項明細</span><button className="text-button" type="button" onClick={onPrint}><FileDown size={14} aria-hidden="true" />列印收據</button></div><div className="receipt-line-detail-table"><div className="receipt-line-detail-header"><span>品項</span><span>數量</span><span>單價</span><span>折扣</span><span>小計</span></div>{lineItems.map((item, index) => <div className="receipt-line-detail-row" key={`${item.name}-${index}`}><span><strong>{item.name}</strong>{item.description && <small>{item.description}</small>}</span><span>{item.quantity}</span><span>{currency} {formatAmount(String(item.unitPrice))}</span><span>{currency} {formatAmount(String(item.discountAmount))}</span><b>{currency} {formatAmount(String(item.subtotal))}</b></div>)}</div></div>;
 }
 
 function EmptyReceipts({ canCreate, onCreate }: { canCreate: boolean; onCreate: () => void }) {
@@ -1056,6 +1108,7 @@ function ReceiptAppearanceSettings({
 
 function ReceiptPaper({ currency, logoUrl, receipt, sealUrl, template }: { currency: string; logoUrl?: string; receipt: ReceiptForm; sealUrl?: string; template: ReceiptTemplate }) {
   const formattedAmount = formatAmount(receipt.amount);
+  const lineItems = receipt.lineItems?.length ? receipt.lineItems : undefined;
   const showPaymentMethod = template.showPaymentMethod && !paymentMethodIsHidden(receipt.paymentMethod);
   const usesUploadedSeal = template.sealSource === "uploaded";
   const showSeal = template.showSeal && (usesUploadedSeal ? Boolean(sealUrl) : Boolean(template.sealChineseName || template.sealEnglishName));
@@ -1076,8 +1129,9 @@ function ReceiptPaper({ currency, logoUrl, receipt, sealUrl, template }: { curre
       <div className="receipt-title-block"><p className="receipt-title">{template.receiptTitle}</p><p className="receipt-title-cn">收據</p></div>
     </div>
     <div className="receipt-meta"><div><span>Receipt No.</span><strong>{receipt.receiptNumber || "自動派號"}</strong></div><div><span>Date</span><strong>{receipt.issueDate || "—"}</strong></div></div>
+    {receipt.sourceQuoteNumber && <p className="receipt-source-quote">Source quotation：{receipt.sourceQuoteNumber}</p>}
     <div className="bill-to"><span>Received from 收到款項自</span><strong>{receipt.payerName || "—"}</strong>{receipt.payerAddress && <p>{receipt.payerAddress}</p>}</div>
-    <div className="receipt-table"><div className="table-header"><span>Particulars 項目</span><span>Amount ({currency})</span></div><div className="table-row"><span>{receipt.description || "—"}</span><strong>{currency} {formattedAmount}</strong></div><div className="table-total"><span>Total 收款總額</span><strong>{currency} {formattedAmount}</strong></div></div>
+    {lineItems ? <table className="receipt-line-items-table"><thead><tr><th>Particulars 項目</th><th>Qty 數量</th><th>Unit price 單價</th><th>Discount 折扣</th><th>Subtotal 小計</th></tr></thead><tbody>{lineItems.map((item, index) => <tr key={`${item.name}-${index}`}><td><strong>{item.name}</strong>{item.description && <small>{item.description}</small>}</td><td>{item.quantity}</td><td>{currency} {formatAmount(String(item.unitPrice))}</td><td>{currency} {formatAmount(String(item.discountAmount))}</td><td>{currency} {formatAmount(String(item.subtotal))}</td></tr>)}</tbody><tfoot><tr><td colSpan={4}>Total 收款總額</td><td>{currency} {formattedAmount}</td></tr></tfoot></table> : <div className="receipt-table"><div className="table-header"><span>Particulars 項目</span><span>Amount ({currency})</span></div><div className="table-row"><span>{receipt.description || "—"}</span><strong>{currency} {formattedAmount}</strong></div><div className="table-total"><span>Total 收款總額</span><strong>{currency} {formattedAmount}</strong></div></div>}
     <div className="amount-words"><span>Amount payable</span><strong>{currency} {formattedAmount}</strong></div>
     {showBottom && <div className={`receipt-bottom ${!showPaymentMethod ? "payment-hidden" : ""}`}>
       {showPaymentMethod && <div className="payment-details"><span>Payment method</span><strong>{receipt.paymentMethod || "—"}</strong>{template.showNotes && receipt.notes && <p>{receipt.notes}</p>}</div>}
