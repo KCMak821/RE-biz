@@ -12,12 +12,19 @@ const SESSION_DURATION_MS = 1000 * 60 * 60 * 24 * 30;
 
 export const memberRoles = ["owner", "admin", "operator", "viewer"] as const;
 export type MemberRole = typeof memberRoles[number];
+export const platformRoles = ["USER", "SUPER_ADMIN"] as const;
+export type PlatformRole = typeof platformRoles[number];
+export const accountStatuses = ["active", "disabled"] as const;
+export type AccountStatus = typeof accountStatuses[number];
+export const workspaceStatuses = ["active", "suspended"] as const;
+export type WorkspaceStatus = typeof workspaceStatuses[number];
 
 export type AppUser = {
   email: string;
   id: string;
   mustChangePassword: boolean;
   name: string;
+  platformRole: PlatformRole;
   organization: {
     address: string;
     bankDetails: string;
@@ -33,21 +40,25 @@ export type AppUser = {
     receiptTemplate: ReceiptTemplate;
     role: MemberRole;
     sealUpdatedAt?: string;
+    status: WorkspaceStatus;
     timeZone: string;
   };
 };
+export type PlatformAdminActor = { email: string; id: string; name: string; platformRole: "SUPER_ADMIN" };
 
-type UserDocument = {
+export type UserDocument = {
+  accountStatus?: AccountStatus;
   createdAt: Date;
   email: string;
   mustChangePassword?: boolean;
   name: string;
   passwordHash: string;
+  platformRole?: PlatformRole;
 };
 
 type OrganizationLogo = { contentType: "image/jpeg" | "image/png" | "image/svg+xml"; data: Binary | Buffer };
 export type OrganizationSeal = { contentType: "image/jpeg" | "image/png" | "image/webp"; data: Binary | Buffer; updatedAt: Date };
-type OrganizationDocument = {
+export type OrganizationDocument = {
   address?: string;
   bankDetails?: string;
   businessRegistration?: string;
@@ -61,6 +72,7 @@ type OrganizationDocument = {
   phone?: string;
   receiptTemplate?: ReceiptTemplate;
   seal?: OrganizationSeal;
+  status?: WorkspaceStatus;
   timeZone: string;
 };
 type MembershipStatus = "active" | "suspended";
@@ -90,8 +102,10 @@ export async function prepareAuthCollections() {
   const database = await getDatabase();
   await Promise.all([
     database.collection<UserDocument>("users").createIndex({ email: 1 }, { unique: true }),
+    database.collection<UserDocument>("users").createIndex({ accountStatus: 1, platformRole: 1 }),
     database.collection<MembershipDocument>("memberships").createIndex({ organizationId: 1, userId: 1 }, { unique: true }),
     database.collection<MembershipDocument>("memberships").createIndex({ userId: 1, status: 1 }),
+    database.collection<OrganizationDocument>("organizations").createIndex({ status: 1, createdAt: -1 }),
     database.collection<SessionDocument>("sessions").createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
     database.collection<SessionDocument>("sessions").createIndex({ tokenHash: 1 }, { unique: true }),
   ]);
@@ -103,8 +117,9 @@ async function createUser(input: { email: string; mustChangePassword: boolean; n
   const email = input.email.toLowerCase();
   try {
     const result = await users.insertOne({
-      createdAt: new Date(), email, mustChangePassword: input.mustChangePassword, name: input.name,
+      accountStatus: "active", createdAt: new Date(), email, mustChangePassword: input.mustChangePassword, name: input.name,
       passwordHash: await hash(input.password, 12),
+      platformRole: "USER",
     });
     return { email, id: result.insertedId.toHexString(), name: input.name };
   } catch (error) {
@@ -116,25 +131,29 @@ async function createUser(input: { email: string; mustChangePassword: boolean; n
 async function ensureOrganization(user: { _id: ObjectId; name: string }) {
   const database = await getDatabase();
   const { memberships, organizations } = userCollections(database);
-  const membership = await memberships.findOne({ userId: user._id });
+  const membership = await memberships.findOne({ status: "active", userId: user._id })
+    ?? await memberships.findOne({ userId: user._id });
   if (membership) return membership;
 
-  const organization = await organizations.insertOne({ createdAt: new Date(), createdBy: user._id, currency: "HKD", name: `${user.name} 的公司`, timeZone: "Asia/Hong_Kong" });
+  const organization = await organizations.insertOne({ createdAt: new Date(), createdBy: user._id, currency: "HKD", name: `${user.name} 的公司`, status: "active", timeZone: "Asia/Hong_Kong" });
   const created = { createdAt: new Date(), createdBy: user._id, organizationId: organization.insertedId, role: "owner" as const, status: "active" as const, userId: user._id };
   await memberships.insertOne(created);
   return created;
 }
 
 async function toAppUser(user: UserDocument & { _id: ObjectId }): Promise<AppUser | null> {
+  if (user.accountStatus === "disabled") return null;
   const membership = await ensureOrganization(user);
   if (membership.status !== "active") return null;
   const organization = await (await getDatabase()).collection<OrganizationDocument>("organizations").findOne({ _id: membership.organizationId });
   if (!organization) return null;
   return {
     email: user.email, id: user._id.toHexString(), mustChangePassword: user.mustChangePassword === true, name: user.name,
+    platformRole: user.platformRole ?? "USER",
     organization: {
       address: organization.address ?? "", bankDetails: organization.bankDetails ?? "", businessRegistration: organization.businessRegistration ?? "", contact: organization.contact ?? "", currency: organization.currency ?? "HKD", email: organization.email ?? "",
       hasLogo: Boolean(organization.logo), hasSealImage: Boolean(organization.seal), id: organization._id.toHexString(), name: organization.name, phone: organization.phone ?? "", receiptTemplate: { ...defaultReceiptTemplate, ...organization.receiptTemplate }, role: membership.role, sealUpdatedAt: organization.seal?.updatedAt.toISOString(), timeZone: organization.timeZone ?? "Asia/Hong_Kong",
+      status: organization.status ?? "active",
     },
   };
 }
@@ -167,7 +186,7 @@ export async function registerOrganizationOwner(input: {
   const userId = new ObjectId(created.id);
   const organization = await database.collection<OrganizationDocument>("organizations").insertOne({
     address: input.address, businessRegistration: input.businessRegistration, contact: input.contact, createdAt: new Date(), createdBy: userId,
-    currency: input.currency, logo: input.logo, name: input.companyName, timeZone: input.timeZone,
+    currency: input.currency, logo: input.logo, name: input.companyName, status: "active", timeZone: input.timeZone,
   });
   await database.collection<MembershipDocument>("memberships").insertOne({
     createdAt: new Date(), createdBy: userId, organizationId: organization.insertedId, role: "owner", status: "active", userId,
@@ -199,10 +218,12 @@ export async function listMembers(user: AppUser) {
   });
 }
 
-export function canManageMembers(user: AppUser) { return user.organization.role === "owner" || user.organization.role === "admin"; }
-export function canManageOrganizationSettings(user: AppUser) { return user.organization.role === "owner" || user.organization.role === "admin"; }
+export function canManageMembers(user: AppUser) { return canUseWorkspace(user) && (user.organization.role === "owner" || user.organization.role === "admin"); }
+export function canUseWorkspace(user: AppUser) { return user.organization.status === "active"; }
+export function isSuperAdmin(user: AppUser | null | undefined): user is AppUser { return user?.platformRole === "SUPER_ADMIN"; }
+export function canManageOrganizationSettings(user: AppUser) { return canUseWorkspace(user) && (user.organization.role === "owner" || user.organization.role === "admin"); }
 export function canCreateRole(user: AppUser, role: MemberRole) { return user.organization.role === "owner" ? role !== "owner" : role === "operator" || role === "viewer"; }
-export function canManageRecords(user: AppUser) { return user.organization.role !== "viewer"; }
+export function canManageRecords(user: AppUser) { return canUseWorkspace(user) && user.organization.role !== "viewer"; }
 
 export async function updateMemberStatus(manager: AppUser, memberId: string, status: MembershipStatus) {
   if (!canManageMembers(manager) || memberId === manager.id) throw new Error("MEMBER_FORBIDDEN");
@@ -275,13 +296,23 @@ export async function createSession(userId: string) {
 }
 
 export async function getCurrentUser(): Promise<AppUser | null> {
+  const user = await getCurrentSessionUser();
+  return user ? toAppUser(user) : null;
+}
+
+async function getCurrentSessionUser(): Promise<(UserDocument & { _id: ObjectId }) | null> {
   const token = (await cookies()).get(SESSION_COOKIE)?.value;
   if (!token) return null;
   const database = await getDatabase();
   const session = await database.collection<SessionDocument>("sessions").findOne({ expiresAt: { $gt: new Date() }, tokenHash: tokenHash(token) });
   if (!session) return null;
-  const user = await database.collection<UserDocument>("users").findOne({ _id: session.userId });
-  return user ? toAppUser(user) : null;
+  return database.collection<UserDocument>("users").findOne({ _id: session.userId });
+}
+
+export async function getCurrentPlatformAdmin(): Promise<PlatformAdminActor | null> {
+  const user = await getCurrentSessionUser();
+  if (!user || user.accountStatus === "disabled" || user.platformRole !== "SUPER_ADMIN") return null;
+  return { email: user.email, id: user._id.toHexString(), name: user.name, platformRole: "SUPER_ADMIN" };
 }
 
 export async function deleteCurrentSession() {

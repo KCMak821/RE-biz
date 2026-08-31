@@ -2,6 +2,7 @@ import { ObjectId } from "mongodb";
 
 import { canManageRecords, getCurrentUser } from "@/lib/auth";
 import { nextQuoteNumber, quotesCollection, type QuoteDocument } from "@/app/api/quotes/route";
+import { canUseWorkspaceFeature } from "@/lib/platform-admin";
 
 export const runtime = "nodejs";
 
@@ -10,6 +11,7 @@ export async function POST(_: Request, { params }: { params: Promise<{ quoteId: 
   try {
     const user = await getCurrentUser(); if (!user) return Response.json({ message: "請先登入。" }, { status: 401 });
     if (!canManageRecords(user)) return Response.json({ message: "你的角色只有檢視權限，無法複製報價單。" }, { status: 403 });
+    if (!await canUseWorkspaceFeature(user, "quotations")) return Response.json({ message: "此工作區目前無法使用報價單功能。" }, { status: 403 });
     const collection = await quotesCollection(); const userId = new ObjectId(user.id); const now = new Date();
     const source = await collection.findOne({ _id: new ObjectId(quoteId), organizationId: new ObjectId(user.organization.id), createdBy: userId });
     if (!source) return Response.json({ message: "報價單不存在。" }, { status: 404 });

@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { canManageRecords, getCurrentUser } from "@/lib/auth";
 import { quoteEffectiveStatus, quotePayloadSchema, type QuoteStatus } from "@/lib/quotation";
+import { canUseWorkspaceFeature } from "@/lib/platform-admin";
 import { quotesCollection, resolveQuotePayload, type QuoteDocument } from "@/app/api/quotes/route";
 import { receiptsCollection } from "@/lib/receipt-store";
 
@@ -26,6 +27,7 @@ export async function GET(_: Request, { params }: { params: Promise<{ quoteId: s
   const id = await quoteId(params); if (!id) return Response.json({ message: "報價單不存在。" }, { status: 404 });
   try {
     const user = await getCurrentUser(); if (!user) return Response.json({ message: "請先登入。" }, { status: 401 });
+    if (!await canUseWorkspaceFeature(user, "quotations")) return Response.json({ message: "此工作區目前無法使用報價單功能。" }, { status: 403 });
     const quote = await ownedQuote(id, user); if (!quote) return Response.json({ message: "報價單不存在。" }, { status: 404 });
     const receipt = quote.receiptId ? await (await receiptsCollection()).findOne({ _id: quote.receiptId, organizationId: new ObjectId(user.organization.id), createdBy: new ObjectId(user.id) }) : await (await receiptsCollection()).findOne({ sourceQuoteId: id, organizationId: new ObjectId(user.organization.id), createdBy: new ObjectId(user.id) });
     return Response.json({ quote: serialize(quote), receipt: receipt ? { id: receipt._id.toHexString(), paymentStatus: receipt.paymentStatus, receiptNumber: receipt.receiptNumber } : null });
@@ -41,6 +43,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ quot
   try {
     const user = await getCurrentUser(); if (!user) return Response.json({ message: "請先登入。" }, { status: 401 });
     if (!canManageRecords(user)) return Response.json({ message: "你的角色只有檢視權限，無法更新報價單。" }, { status: 403 });
+    if (!await canUseWorkspaceFeature(user, "quotations")) return Response.json({ message: "此工作區目前無法使用報價單功能。" }, { status: 403 });
     const quote = await ownedQuote(id, user); if (!quote) return Response.json({ message: "報價單不存在。" }, { status: 404 });
     if (statusRequest.success) {
       if (quoteEffectiveStatus(quote.status, quote.validUntil) === "expired") return Response.json({ message: "已失效的報價單不可變更狀態。" }, { status: 409 });

@@ -2,6 +2,7 @@ import { ObjectId } from "mongodb";
 
 import { canManageRecords, getCurrentUser, type AppUser } from "@/lib/auth";
 import { getDatabase } from "@/lib/mongodb";
+import { canUseWorkspaceFeature } from "@/lib/platform-admin";
 import {
   calculatedLines, calculatedQuoteTotals, customerFieldsSchema, quoteEffectiveStatus, quotePayloadSchema,
   type CustomerFields, type QuoteLine, type QuotePayload, type QuoteStatus,
@@ -135,6 +136,7 @@ export async function GET(request: Request) {
   try {
     const user = await getCurrentUser();
     if (!user) return Response.json({ message: "請先登入。" }, { status: 401 });
+    if (!await canUseWorkspaceFeature(user, "quotations")) return Response.json({ message: "此工作區目前無法使用報價單功能。" }, { status: 403 });
     const { searchParams } = new URL(request.url);
     const keyword = searchParams.get("q")?.trim().slice(0, 100) ?? "";
     const requestedStatus = searchParams.get("status");
@@ -163,6 +165,7 @@ export async function POST(request: Request) {
     const user = await getCurrentUser();
     if (!user) return Response.json({ message: "請先登入。" }, { status: 401 });
     if (!canManageRecords(user)) return Response.json({ message: "你的角色只有檢視權限，無法建立報價單。" }, { status: 403 });
+    if (!await canUseWorkspaceFeature(user, "quotations")) return Response.json({ message: "此工作區目前無法使用報價單功能。" }, { status: 403 });
     const resolved = await resolveQuotePayload(user, parsed.data);
     const now = new Date(); const userId = new ObjectId(user.id);
     const document: QuoteDocument = {

@@ -3,6 +3,7 @@ import { ObjectId } from "mongodb";
 import { canManageRecords, getCurrentUser } from "@/lib/auth";
 import { getDatabase } from "@/lib/mongodb";
 import { itemFieldsSchema, type ItemFields } from "@/lib/quotation";
+import { canUseWorkspaceFeature } from "@/lib/platform-admin";
 
 export const runtime = "nodejs";
 
@@ -25,6 +26,7 @@ export async function GET() {
   try {
     const user = await getCurrentUser();
     if (!user) return Response.json({ message: "請先登入。" }, { status: 401 });
+    if (!await canUseWorkspaceFeature(user, "quotations")) return Response.json({ message: "此工作區目前無法使用報價單功能。" }, { status: 403 });
     const items = await (await itemsCollection()).find({ organizationId: new ObjectId(user.organization.id), createdBy: new ObjectId(user.id) }).sort({ isActive: -1, name: 1 }).limit(500).toArray();
     return Response.json({ items: items.map(serialize) });
   } catch { return Response.json({ message: "無法讀取常用品項。" }, { status: 503 }); }
@@ -37,6 +39,7 @@ export async function POST(request: Request) {
     const user = await getCurrentUser();
     if (!user) return Response.json({ message: "請先登入。" }, { status: 401 });
     if (!canManageRecords(user)) return Response.json({ message: "你的角色只有檢視權限，無法新增品項。" }, { status: 403 });
+    if (!await canUseWorkspaceFeature(user, "quotations")) return Response.json({ message: "此工作區目前無法使用報價單功能。" }, { status: 403 });
     const now = new Date(); const collection = await itemsCollection();
     const result = await collection.insertOne({ ...parsed.data, createdAt: now, createdBy: new ObjectId(user.id), organizationId: new ObjectId(user.organization.id), updatedAt: now });
     const item = await collection.findOne({ _id: result.insertedId, createdBy: new ObjectId(user.id) });

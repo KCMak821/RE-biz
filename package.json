@@ -11,6 +11,8 @@
     "start": "next start",
     "test": "npm run build",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
+    "db:migrate": "node migrations/20260831_add-platform-admin.mjs",
+    "db:grant-super-admin": "node scripts/grant-super-admin.mjs",
     "db:up": "docker compose up -d mongodb",
     "db:down": "docker compose down"
   },

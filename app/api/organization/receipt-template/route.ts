@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { canManageOrganizationSettings, getCurrentUser, updateOrganizationReceiptTemplate } from "@/lib/auth";
+import { canManageOrganizationSettings, canUseWorkspace, getCurrentUser, updateOrganizationReceiptTemplate } from "@/lib/auth";
 import type { ReceiptTemplate } from "@/lib/receipt-template";
 
 export const runtime = "nodejs";
@@ -26,6 +26,7 @@ export async function GET() {
   try {
     const user = await getCurrentUser();
     if (!user) return Response.json({ message: "請先登入。" }, { status: 401 });
+    if (!canUseWorkspace(user)) return Response.json({ message: "此工作區目前已停用。" }, { status: 403 });
     return Response.json({ receiptTemplate: user.organization.receiptTemplate });
   } catch {
     return Response.json({ message: "無法讀取收據樣式。" }, { status: 503 });

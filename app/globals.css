@@ -29,8 +29,8 @@ button { cursor: pointer; }
 .sidebar-label { margin: 0 10px 9px; color: #78837b; font-size: 10px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
 .sidebar-label-settings { margin-top: 32px; }
 .sidebar-nav { display: grid; gap: 3px; }
-.sidebar-nav button { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 42px; border: 0; border-radius: 5px; background: transparent; color: #58655f; padding: 0 10px; text-align: left; font-size: 13px; font-weight: 700; }
-.sidebar-nav button:hover { background: #e5eadf; color: var(--forest); }
+.sidebar-nav button, .sidebar-nav .sidebar-admin-link { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 42px; border: 0; border-radius: 5px; background: transparent; color: #58655f; padding: 0 10px; text-align: left; font-size: 13px; font-weight: 700; text-decoration: none; }
+.sidebar-nav button:hover, .sidebar-nav .sidebar-admin-link:hover { background: #e5eadf; color: var(--forest); }
 .sidebar-nav button.active { background: var(--forest); color: #fff; box-shadow: 0 2px 5px rgba(30, 76, 69, .18); }
 .sidebar-help { display: grid; gap: 5px; margin: auto 10px 0; border-top: 1px solid #d2d8cf; padding-top: 17px; color: #6a766e; font-size: 11px; line-height: 1.45; }
 .sidebar-help strong { color: var(--ink); }
@@ -543,7 +543,7 @@ footer { padding-top: 16px; padding-bottom: 19px; color: #657169; font-size: 11p
   .sidebar-label, .sidebar-help { display: none; }
   .sidebar-label-settings { margin: 0; }
   .sidebar-nav { display: flex; flex: 0 0 auto; gap: 5px; }
-  .sidebar-nav button { width: auto; min-height: 36px; white-space: nowrap; }
+  .sidebar-nav button, .sidebar-nav .sidebar-admin-link { width: auto; min-height: 36px; white-space: nowrap; }
   .page-view { padding: 38px 30px 52px; }
   .appearance-page { padding: 38px 30px 52px; }
   .appearance-layout { grid-template-columns: 1fr; }
@@ -557,7 +557,7 @@ footer { padding-top: 16px; padding-bottom: 19px; color: #657169; font-size: 11p
   .topbar-note, footer .footer-separator, footer span:last-child { display: none; }
   .editor-panel, .preview-column { padding: 32px 20px; }
   .app-sidebar { padding-right: 12px; padding-left: 12px; }
-  .sidebar-nav button { gap: 6px; padding: 0 8px; font-size: 12px; }
+  .sidebar-nav button, .sidebar-nav .sidebar-admin-link { gap: 6px; padding: 0 8px; font-size: 12px; }
   .page-view { padding: 30px 20px 44px; }
   .page-heading { display: grid; gap: 17px; margin-bottom: 24px; }
   .page-heading h2 { font-size: 28px; }

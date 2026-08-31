@@ -3,6 +3,7 @@ import { ObjectId } from "mongodb";
 import { canManageRecords, getCurrentUser } from "@/lib/auth";
 import { customerFieldsSchema, type CustomerFields } from "@/lib/quotation";
 import { getDatabase } from "@/lib/mongodb";
+import { canUseWorkspaceFeature } from "@/lib/platform-admin";
 
 export const runtime = "nodejs";
 
@@ -30,6 +31,7 @@ export async function GET() {
   try {
     const user = await getCurrentUser();
     if (!user) return Response.json({ message: "請先登入。" }, { status: 401 });
+    if (!await canUseWorkspaceFeature(user, "quotations")) return Response.json({ message: "此工作區目前無法使用報價單功能。" }, { status: 403 });
     const customers = await (await customersCollection()).find({
       organizationId: new ObjectId(user.organization.id), createdBy: new ObjectId(user.id),
     }).sort({ name: 1 }).limit(500).toArray();
@@ -46,6 +48,7 @@ export async function POST(request: Request) {
     const user = await getCurrentUser();
     if (!user) return Response.json({ message: "請先登入。" }, { status: 401 });
     if (!canManageRecords(user)) return Response.json({ message: "你的角色只有檢視權限，無法新增客戶。" }, { status: 403 });
+    if (!await canUseWorkspaceFeature(user, "quotations")) return Response.json({ message: "此工作區目前無法使用報價單功能。" }, { status: 403 });
     const now = new Date();
     const result = await (await customersCollection()).insertOne({
       ...parsed.data, createdAt: now, createdBy: new ObjectId(user.id), organizationId: new ObjectId(user.organization.id), updatedAt: now,

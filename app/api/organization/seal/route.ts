@@ -1,6 +1,6 @@
 import { Binary } from "mongodb";
 
-import { canManageOrganizationSettings, getCurrentUser, getOrganizationSeal, updateOrganizationSeal } from "@/lib/auth";
+import { canManageOrganizationSettings, canUseWorkspace, getCurrentUser, getOrganizationSeal, updateOrganizationSeal } from "@/lib/auth";
 
 export const runtime = "nodejs";
 
@@ -11,6 +11,7 @@ export async function GET() {
   try {
     const user = await getCurrentUser();
     if (!user) return Response.json({ message: "請先登入。" }, { status: 401 });
+    if (!canUseWorkspace(user)) return Response.json({ message: "此工作區目前已停用。" }, { status: 403 });
     const seal = await getOrganizationSeal(user);
     if (!seal) return Response.json({ message: "尚未上傳公司印章。" }, { status: 404 });
     const data = seal.data instanceof Binary ? Buffer.from(seal.data.buffer) : seal.data;

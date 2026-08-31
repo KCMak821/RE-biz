@@ -71,8 +71,8 @@ type LedgerEntry = {
 };
 type LedgerEntryForm = Pick<LedgerEntry, "date" | "description" | "type"> & { amount: string };
 type LedgerSummary = { balance: number; expense: number; income: number };
-type OrganizationProfile = { address: string; bankDetails: string; businessRegistration: string; contact: string; currency: string; email: string; hasLogo: boolean; hasSealImage: boolean; id: string; name: string; phone: string; receiptTemplate: ReceiptTemplate; role: "owner" | "admin" | "operator" | "viewer"; sealUpdatedAt?: string; timeZone: string };
-type SessionUser = { email: string; id: string; mustChangePassword: boolean; name: string; organization: OrganizationProfile };
+type OrganizationProfile = { address: string; bankDetails: string; businessRegistration: string; contact: string; currency: string; email: string; hasLogo: boolean; hasSealImage: boolean; id: string; name: string; phone: string; receiptTemplate: ReceiptTemplate; role: "owner" | "admin" | "operator" | "viewer"; sealUpdatedAt?: string; status: "active" | "suspended"; timeZone: string };
+type SessionUser = { email: string; id: string; mustChangePassword: boolean; name: string; organization: OrganizationProfile; platformRole: "USER" | "SUPER_ADMIN" };
 
 const today = new Date().toISOString().slice(0, 10);
 const batchColumns = "開立日期,付款人名稱,付款人地址,收款項目／說明,收款金額,付款方式,備註";
@@ -558,6 +558,10 @@ export default function Home() {
     return <ChangePasswordScreen currentPassword={passwordCurrent} message={passwordMessage} nextPassword={passwordNext} repeatPassword={passwordRepeat} onCurrentPasswordChange={setPasswordCurrent} onNextPasswordChange={setPasswordNext} onRepeatPasswordChange={setPasswordRepeat} onSubmit={changeOwnPassword} />;
   }
 
+  if (user.organization.status === "suspended") {
+    return <WorkspaceSuspendedScreen isSuperAdmin={user.platformRole === "SUPER_ADMIN"} onSignOut={signOut} />;
+  }
+
   // Include the organization id so browsers never reuse an earlier failed image response.
   const companyLogoUrl = user.organization.hasLogo ? `/api/organization/logo?v=${encodeURIComponent(user.organization.id)}` : undefined;
   const companySealUrl = user.organization.hasSealImage ? `/api/organization/seal?v=${encodeURIComponent(user.organization.sealUpdatedAt ?? user.organization.id)}` : undefined;
@@ -590,6 +594,7 @@ export default function Home() {
             {user.organization.role !== "viewer" && <button className={appView === "create" ? "active" : ""} type="button" onClick={startReceipt}><Plus size={17} aria-hidden="true" />新增收據</button>}
           </nav>
           {(user.organization.role === "owner" || user.organization.role === "admin") && <><p className="sidebar-label sidebar-label-settings">設定</p><nav className="sidebar-nav"><button className={appView === "members" ? "active" : ""} type="button" onClick={() => setAppView("members")}><UsersRound size={17} aria-hidden="true" />成員與權限</button><button className={appView === "appearance" ? "active" : ""} type="button" onClick={() => setAppView("appearance")}><Palette size={17} aria-hidden="true" />收據樣式</button></nav></>}
+          {user.platformRole === "SUPER_ADMIN" && <><p className="sidebar-label sidebar-label-settings">平台</p><nav className="sidebar-nav"><a className="sidebar-admin-link" href="/admin">Platform Admin</a></nav></>}
           <div className="sidebar-help"><strong>目前公司</strong><span>{user.organization.name}</span><span>{roleLabel(user.organization.role)}</span></div>
         </aside>
 
@@ -858,6 +863,15 @@ function ChangePasswordScreen({ currentPassword, message, nextPassword, repeatPa
       {message && <p className="validation-message" role="alert">{message}</p>}
       <button className="auth-submit" type="submit"><KeyRound size={16} aria-hidden="true" />儲存新密碼</button>
     </form>
+  </section></main>;
+}
+
+function WorkspaceSuspendedScreen({ isSuperAdmin, onSignOut }: { isSuperAdmin: boolean; onSignOut: () => Promise<void> }) {
+  return <main className="auth-shell"><section className="auth-card" aria-labelledby="workspace-suspended-title">
+    <div className="brand-lockup"><Image className="brand-mark" src="/re-biz-mark.svg" alt="RE-Biz" width={36} height={36} priority /><div><p className="eyebrow">WORKSPACE STATUS</p><h1>RE-Biz</h1></div></div>
+    <div className="auth-heading"><p className="eyebrow">ACCESS PAUSED</p><h2 id="workspace-suspended-title">This workspace has been suspended.</h2><p>Please contact support for assistance. Your workspace data has been retained.</p></div>
+    {isSuperAdmin && <a className="auth-submit" href="/admin">前往 Platform Admin</a>}
+    <button className="auth-switch-button" type="button" onClick={() => void onSignOut()}>登出</button>
   </section></main>;
 }
 

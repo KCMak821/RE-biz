@@ -1,6 +1,7 @@
 import { ObjectId } from "mongodb";
 
 import { canManageRecords, getCurrentUser } from "@/lib/auth";
+import { canUseWorkspaceFeature } from "@/lib/platform-admin";
 import { ledgerEntrySchema, type LedgerEntryInput } from "@/lib/ledger";
 import { getDatabase } from "@/lib/mongodb";
 
@@ -33,6 +34,7 @@ export async function GET() {
   try {
     const user = await getCurrentUser();
     if (!user) return Response.json({ message: "請先登入。" }, { status: 401 });
+    if (!await canUseWorkspaceFeature(user, "accounting")) return Response.json({ message: "此工作區目前無法使用記帳功能。" }, { status: 403 });
 
     const organizationId = new ObjectId(user.organization.id);
     const userId = new ObjectId(user.id);
@@ -96,6 +98,7 @@ export async function POST(request: Request) {
     const user = await getCurrentUser();
     if (!user) return Response.json({ message: "請先登入。" }, { status: 401 });
     if (!canManageRecords(user)) return Response.json({ message: "你的角色只有檢視權限，無法新增記帳資料。" }, { status: 403 });
+    if (!await canUseWorkspaceFeature(user, "accounting")) return Response.json({ message: "此工作區目前無法使用記帳功能。" }, { status: 403 });
 
     const entry: LedgerEntryDocument = {
       ...parsed.data,

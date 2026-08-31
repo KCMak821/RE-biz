@@ -2,6 +2,7 @@ import { ObjectId } from "mongodb";
 import { z } from "zod";
 
 import { canManageRecords, getCurrentUser } from "@/lib/auth";
+import { canUseWorkspaceFeature } from "@/lib/platform-admin";
 import { receiptCreateSchema } from "@/lib/receipt";
 import { createReceiptDocuments, receiptsCollection } from "@/lib/receipt-store";
 
@@ -18,6 +19,7 @@ export async function GET() {
   try {
     const user = await requireUser();
     if (!user) return Response.json({ message: "請先登入。" }, { status: 401 });
+    if (!await canUseWorkspaceFeature(user, "receipts")) return Response.json({ message: "此工作區目前無法使用收據功能。" }, { status: 403 });
 
     const collection = await receiptsCollection();
     const organizationId = new ObjectId(user.organization.id);
@@ -71,6 +73,7 @@ export async function POST(request: Request) {
     const user = await requireUser();
     if (!user) return Response.json({ message: "請先登入。" }, { status: 401 });
     if (!canManageRecords(user)) return Response.json({ message: "你的角色只有檢視權限，無法儲存收據。" }, { status: 403 });
+    if (!await canUseWorkspaceFeature(user, "receipts")) return Response.json({ message: "此工作區目前無法使用收據功能。" }, { status: 403 });
 
     const organizationId = new ObjectId(user.organization.id);
     const result = await createReceiptDocuments({ createdBy: new ObjectId(user.id), organizationId, receipts: parsed.data.receipts });

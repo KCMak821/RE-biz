@@ -4,6 +4,7 @@ import { canManageRecords, getCurrentUser } from "@/lib/auth";
 import { quoteEffectiveStatus } from "@/lib/quotation";
 import { quotesCollection } from "@/app/api/quotes/route";
 import { nextReceiptNumbers, receiptsCollection, type ReceiptDocument } from "@/lib/receipt-store";
+import { canUseWorkspaceFeature } from "@/lib/platform-admin";
 
 export const runtime = "nodejs";
 
@@ -12,6 +13,7 @@ export async function POST(_: Request, { params }: { params: Promise<{ quoteId: 
   try {
     const user = await getCurrentUser(); if (!user) return Response.json({ message: "請先登入。" }, { status: 401 });
     if (!canManageRecords(user)) return Response.json({ message: "你的角色只有檢視權限，無法建立收據草稿。" }, { status: 403 });
+    if (!await canUseWorkspaceFeature(user, "quotations") || !await canUseWorkspaceFeature(user, "receipts")) return Response.json({ message: "此工作區目前無法建立報價單收據。" }, { status: 403 });
     const organizationId = new ObjectId(user.organization.id); const userId = new ObjectId(user.id); const id = new ObjectId(quoteId);
     const quote = await (await quotesCollection()).findOne({ _id: id, organizationId, createdBy: userId });
     if (!quote) return Response.json({ message: "報價單不存在。" }, { status: 404 });

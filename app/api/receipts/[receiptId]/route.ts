@@ -2,6 +2,7 @@ import { ObjectId } from "mongodb";
 import { z } from "zod";
 
 import { canManageRecords, getCurrentUser } from "@/lib/auth";
+import { canUseWorkspaceFeature } from "@/lib/platform-admin";
 import { receiptsCollection } from "@/lib/receipt-store";
 
 export const runtime = "nodejs";
@@ -18,6 +19,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ rece
     const user = await getCurrentUser();
     if (!user) return Response.json({ message: "請先登入。" }, { status: 401 });
     if (!canManageRecords(user)) return Response.json({ message: "你的角色只有檢視權限，無法確認收款。" }, { status: 403 });
+    if (!await canUseWorkspaceFeature(user, "receipts")) return Response.json({ message: "此工作區目前無法使用收據功能。" }, { status: 403 });
     const result = await (await receiptsCollection()).updateOne(
       { _id: new ObjectId(receiptId), organizationId: new ObjectId(user.organization.id), createdBy: new ObjectId(user.id) },
       { $set: { paymentStatus: "paid", updatedAt: new Date() } },
