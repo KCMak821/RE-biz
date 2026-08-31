@@ -4,8 +4,13 @@ import type { AppUser } from "@/lib/auth";
 import { customersCollection } from "@/lib/customer-store";
 import { getDatabase } from "@/lib/mongodb";
 import {
-  calculatedLines, calculatedQuoteTotals, customerFieldsSchema,
-  type CustomerFields, type QuoteLine, type QuotePayload, type QuoteStatus,
+  calculatedLines,
+  calculatedQuoteTotals,
+  customerFieldsSchema,
+  type CustomerFields,
+  type QuoteLine,
+  type QuotePayload,
+  type QuoteStatus,
 } from "@/lib/quotation";
 
 type CompanySnapshot = {
@@ -38,20 +43,41 @@ export type QuoteDocument = {
   validUntil: string;
 };
 
-type QuoteCounter = { createdAt: Date; monthKey: string; sequence: number; updatedAt: Date; userId: ObjectId };
+type QuoteCounter = {
+  createdAt: Date;
+  monthKey: string;
+  sequence: number;
+  updatedAt: Date;
+  userId: ObjectId;
+};
 
 export async function quotesCollection() {
   const collection = (await getDatabase()).collection<QuoteDocument>("quotes");
   await Promise.all([
-    collection.createIndex({ organizationId: 1, createdBy: 1, quoteNumber: 1 }, { unique: true }),
-    collection.createIndex({ organizationId: 1, createdBy: 1, issueDate: -1, createdAt: -1 }),
-    collection.createIndex({ organizationId: 1, createdBy: 1, status: 1, validUntil: 1 }),
+    collection.createIndex(
+      { organizationId: 1, createdBy: 1, quoteNumber: 1 },
+      { unique: true },
+    ),
+    collection.createIndex({
+      organizationId: 1,
+      createdBy: 1,
+      issueDate: -1,
+      createdAt: -1,
+    }),
+    collection.createIndex({
+      organizationId: 1,
+      createdBy: 1,
+      status: 1,
+      validUntil: 1,
+    }),
   ]);
   return collection;
 }
 
 async function quoteCountersCollection() {
-  const collection = (await getDatabase()).collection<QuoteCounter>("quoteCounters");
+  const collection = (await getDatabase()).collection<QuoteCounter>(
+    "quoteCounters",
+  );
   await collection.createIndex({ userId: 1, monthKey: 1 }, { unique: true });
   return collection;
 }
@@ -65,13 +91,26 @@ export async function nextQuoteNumber(userId: ObjectId, issueDate: string) {
     try {
       const counter = await counters.findOneAndUpdate(
         { monthKey, userId },
-        { $inc: { sequence: 1 }, $set: { updatedAt: new Date() }, $setOnInsert: { createdAt: new Date(), monthKey, userId } },
+        {
+          $inc: { sequence: 1 },
+          $set: { updatedAt: new Date() },
+          $setOnInsert: { createdAt: new Date(), monthKey, userId },
+        },
         { returnDocument: "after", upsert: true },
       );
       if (!counter) throw new Error("COUNTER_UNAVAILABLE");
       return `QUO-${monthKey}-${String(counter.sequence).padStart(4, "0")}`;
     } catch (error) {
-      if (!(typeof error === "object" && error && "code" in error && error.code === 11000) || attempt === 2) throw error;
+      if (
+        !(
+          typeof error === "object" &&
+          error &&
+          "code" in error &&
+          error.code === 11000
+        ) ||
+        attempt === 2
+      )
+        throw error;
     }
   }
   throw new Error("COUNTER_UNAVAILABLE");
@@ -91,13 +130,23 @@ export function companySnapshot(user: AppUser): CompanySnapshot {
 export async function resolveQuotePayload(user: AppUser, input: QuotePayload) {
   let customer = input.customer;
   if (input.customerId) {
-    const savedCustomer = await (await customersCollection()).findOne({
-      _id: new ObjectId(input.customerId), organizationId: new ObjectId(user.organization.id), createdBy: new ObjectId(user.id),
+    const savedCustomer = await (
+      await customersCollection()
+    ).findOne({
+      _id: new ObjectId(input.customerId),
+      organizationId: new ObjectId(user.organization.id),
+      $or: [{ status: "active" }, { status: { $exists: false } }],
     });
     if (!savedCustomer) throw new Error("CUSTOMER_NOT_FOUND");
     customer = customerFieldsSchema.parse({
-      address: savedCustomer.address, contact: savedCustomer.contact, email: savedCustomer.email,
-      name: savedCustomer.name, notes: savedCustomer.notes, phone: savedCustomer.phone,
+      address: savedCustomer.address,
+      businessRegistration: savedCustomer.businessRegistration,
+      companyName: savedCustomer.companyName,
+      contact: savedCustomer.contact,
+      email: savedCustomer.email,
+      name: savedCustomer.name,
+      notes: savedCustomer.notes,
+      phone: savedCustomer.phone,
     });
   }
   const lines = calculatedLines(input.lines);
