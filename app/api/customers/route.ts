@@ -1,0 +1,58 @@
+import { ObjectId } from "mongodb";
+
+import { canManageRecords, getCurrentUser } from "@/lib/auth";
+import { customerFieldsSchema, type CustomerFields } from "@/lib/quotation";
+import { getDatabase } from "@/lib/mongodb";
+
+export const runtime = "nodejs";
+
+export type CustomerDocument = CustomerFields & {
+  createdAt: Date;
+  createdBy: ObjectId;
+  organizationId: ObjectId;
+  updatedAt: Date;
+};
+
+export async function customersCollection() {
+  const collection = (await getDatabase()).collection<CustomerDocument>("customers");
+  await Promise.all([
+    collection.createIndex({ organizationId: 1, createdBy: 1, name: 1 }),
+    collection.createIndex({ organizationId: 1, createdBy: 1, updatedAt: -1 }),
+  ]);
+  return collection;
+}
+
+function serialize(document: CustomerDocument & { _id: ObjectId }) {
+  return { ...document, createdAt: document.createdAt.toISOString(), id: document._id.toHexString(), updatedAt: document.updatedAt.toISOString(), _id: undefined, createdBy: undefined, organizationId: undefined };
+}
+
+export async function GET() {
+  try {
+    const user = await getCurrentUser();
+    if (!user) return Response.json({ message: "請先登入。" }, { status: 401 });
+    const customers = await (await customersCollection()).find({
+      organizationId: new ObjectId(user.organization.id), createdBy: new ObjectId(user.id),
+    }).sort({ name: 1 }).limit(500).toArray();
+    return Response.json({ customers: customers.map(serialize) });
+  } catch {
+    return Response.json({ message: "無法讀取客戶資料。" }, { status: 503 });
+  }
+}
+
+export async function POST(request: Request) {
+  const parsed = customerFieldsSchema.safeParse(await request.json().catch(() => null));
+  if (!parsed.success) return Response.json({ message: "客戶資料格式不正確。" }, { status: 400 });
+  try {
+    const user = await getCurrentUser();
+    if (!user) return Response.json({ message: "請先登入。" }, { status: 401 });
+    if (!canManageRecords(user)) return Response.json({ message: "你的角色只有檢視權限，無法新增客戶。" }, { status: 403 });
+    const now = new Date();
+    const result = await (await customersCollection()).insertOne({
+      ...parsed.data, createdAt: now, createdBy: new ObjectId(user.id), organizationId: new ObjectId(user.organization.id), updatedAt: now,
+    });
+    const customer = await (await customersCollection()).findOne({ _id: result.insertedId, createdBy: new ObjectId(user.id) });
+    return Response.json({ customer: customer ? serialize(customer) : null }, { status: 201 });
+  } catch {
+    return Response.json({ message: "無法新增客戶。" }, { status: 503 });
+  }
+}

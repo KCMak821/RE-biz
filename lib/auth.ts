@@ -20,13 +20,16 @@ export type AppUser = {
   name: string;
   organization: {
     address: string;
+    bankDetails: string;
     businessRegistration: string;
     contact: string;
     currency: string;
+    email: string;
     hasLogo: boolean;
     hasSealImage: boolean;
     id: string;
     name: string;
+    phone: string;
     receiptTemplate: ReceiptTemplate;
     role: MemberRole;
     sealUpdatedAt?: string;
@@ -46,13 +49,16 @@ type OrganizationLogo = { contentType: "image/jpeg" | "image/png" | "image/svg+x
 export type OrganizationSeal = { contentType: "image/jpeg" | "image/png" | "image/webp"; data: Binary | Buffer; updatedAt: Date };
 type OrganizationDocument = {
   address?: string;
+  bankDetails?: string;
   businessRegistration?: string;
   contact?: string;
   createdAt: Date;
   createdBy: ObjectId;
   currency: string;
+  email?: string;
   logo?: OrganizationLogo;
   name: string;
+  phone?: string;
   receiptTemplate?: ReceiptTemplate;
   seal?: OrganizationSeal;
   timeZone: string;
@@ -127,8 +133,8 @@ async function toAppUser(user: UserDocument & { _id: ObjectId }): Promise<AppUse
   return {
     email: user.email, id: user._id.toHexString(), mustChangePassword: user.mustChangePassword === true, name: user.name,
     organization: {
-      address: organization.address ?? "", businessRegistration: organization.businessRegistration ?? "", contact: organization.contact ?? "", currency: organization.currency ?? "HKD",
-      hasLogo: Boolean(organization.logo), hasSealImage: Boolean(organization.seal), id: organization._id.toHexString(), name: organization.name, receiptTemplate: { ...defaultReceiptTemplate, ...organization.receiptTemplate }, role: membership.role, sealUpdatedAt: organization.seal?.updatedAt.toISOString(), timeZone: organization.timeZone ?? "Asia/Hong_Kong",
+      address: organization.address ?? "", bankDetails: organization.bankDetails ?? "", businessRegistration: organization.businessRegistration ?? "", contact: organization.contact ?? "", currency: organization.currency ?? "HKD", email: organization.email ?? "",
+      hasLogo: Boolean(organization.logo), hasSealImage: Boolean(organization.seal), id: organization._id.toHexString(), name: organization.name, phone: organization.phone ?? "", receiptTemplate: { ...defaultReceiptTemplate, ...organization.receiptTemplate }, role: membership.role, sealUpdatedAt: organization.seal?.updatedAt.toISOString(), timeZone: organization.timeZone ?? "Asia/Hong_Kong",
     },
   };
 }
@@ -243,6 +249,21 @@ export async function updateOrganizationReceiptTemplate(user: AppUser, receiptTe
   await (await getDatabase()).collection<OrganizationDocument>("organizations").updateOne(
     { _id: new ObjectId(user.organization.id) },
     { $set: { receiptTemplate } },
+  );
+}
+
+export async function updateOrganizationProfile(user: AppUser, profile: {
+  address: string;
+  bankDetails: string;
+  businessRegistration: string;
+  contact: string;
+  email: string;
+  name: string;
+  phone: string;
+}) {
+  await (await getDatabase()).collection<OrganizationDocument>("organizations").updateOne(
+    { _id: new ObjectId(user.organization.id) },
+    { $set: profile },
   );
 }
 

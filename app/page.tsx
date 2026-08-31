@@ -3,12 +3,13 @@
 /* Authenticated, organization-scoped images cannot pass through Next's image optimizer. */
 /* eslint-disable @next/next/no-img-element */
 
-import { ArrowDownRight, ArrowUpRight, BookOpenText, Download, FileDown, FileUp, LayoutDashboard, Palette, Plus, ReceiptText, RotateCcw, Rows3, FileText } from "lucide-react";
+import { ArrowDownRight, ArrowUpRight, BookOpenText, Download, FileDown, FileUp, LayoutDashboard, Palette, Plus, ReceiptText, RotateCcw, Rows3, FileText, FileSignature } from "lucide-react";
 import { KeyRound, LogIn, LogOut, UserPlus, UsersRound } from "lucide-react";
 import Image from "next/image";
 import { type ChangeEvent, type CSSProperties, FormEvent, useEffect, useMemo, useState } from "react";
 
 import { defaultReceiptTemplate, receiptTemplatePresets, type ReceiptTemplate } from "@/lib/receipt-template";
+import { QuotationWorkspace } from "@/components/quotation-workspace";
 
 type ReceiptForm = {
   receiptNumber: string;
@@ -27,7 +28,7 @@ type ReceiptForm = {
 
 type BatchReceipt = ReceiptForm & { sourceLine: number };
 type Mode = "single" | "batch";
-type AppView = "dashboard" | "receipts" | "ledger" | "create" | "members" | "appearance";
+type AppView = "dashboard" | "receipts" | "ledger" | "create" | "members" | "appearance" | "quotes";
 type AuthMode = "loading" | "login" | "register" | "authenticated" | "unavailable";
 type SavedReceipt = {
   amount: number;
@@ -35,7 +36,10 @@ type SavedReceipt = {
   id: string;
   issueDate: string;
   payerName: string;
+  paymentStatus?: "pending" | "paid";
   receiptNumber: string;
+  sourceQuoteId?: string;
+  sourceQuoteNumber?: string;
 };
 type LedgerEntry = {
   amount: number;
@@ -48,7 +52,7 @@ type LedgerEntry = {
 };
 type LedgerEntryForm = Pick<LedgerEntry, "date" | "description" | "type"> & { amount: string };
 type LedgerSummary = { balance: number; expense: number; income: number };
-type OrganizationProfile = { address: string; businessRegistration: string; contact: string; currency: string; hasLogo: boolean; hasSealImage: boolean; id: string; name: string; receiptTemplate: ReceiptTemplate; role: "owner" | "admin" | "operator" | "viewer"; sealUpdatedAt?: string; timeZone: string };
+type OrganizationProfile = { address: string; bankDetails: string; businessRegistration: string; contact: string; currency: string; email: string; hasLogo: boolean; hasSealImage: boolean; id: string; name: string; phone: string; receiptTemplate: ReceiptTemplate; role: "owner" | "admin" | "operator" | "viewer"; sealUpdatedAt?: string; timeZone: string };
 type SessionUser = { email: string; id: string; mustChangePassword: boolean; name: string; organization: OrganizationProfile };
 
 const today = new Date().toISOString().slice(0, 10);
@@ -475,6 +479,15 @@ export default function Home() {
     return null;
   }
 
+  async function confirmReceiptPayment(receipt: SavedReceipt) {
+    const response = await fetch(`/api/receipts/${receipt.id}`, { body: JSON.stringify({ paymentStatus: "paid" }), headers: { "content-type": "application/json" }, method: "PUT" });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) { setSaveMessage(data.message ?? "無法確認收款。"); return; }
+    setSavedReceipts((current) => current.map((item) => item.id === receipt.id ? { ...item, paymentStatus: "paid" } : item));
+    setLedgerVersion((current) => current + 1);
+    setSaveMessage(`${receipt.receiptNumber} 已確認收款，並已列入收入。`);
+  }
+
   const hasMissingRequired = [form.issuerName, form.payerName, form.description, form.amount]
     .some((value) => !value.trim()) || !paymentMethodIsValid(form.paymentMethod);
 
@@ -526,6 +539,7 @@ export default function Home() {
             <button className={appView === "dashboard" ? "active" : ""} type="button" onClick={() => setAppView("dashboard")}><LayoutDashboard size={17} aria-hidden="true" />總覽</button>
             <button className={appView === "ledger" ? "active" : ""} type="button" onClick={() => setAppView("ledger")}><BookOpenText size={17} aria-hidden="true" />收支記帳</button>
             <button className={appView === "receipts" ? "active" : ""} type="button" onClick={() => setAppView("receipts")}><ReceiptText size={17} aria-hidden="true" />收據中心</button>
+            <button className={appView === "quotes" ? "active" : ""} type="button" onClick={() => setAppView("quotes")}><FileSignature size={17} aria-hidden="true" />報價單</button>
             {user.organization.role !== "viewer" && <button className={appView === "create" ? "active" : ""} type="button" onClick={startReceipt}><Plus size={17} aria-hidden="true" />新增收據</button>}
           </nav>
           {(user.organization.role === "owner" || user.organization.role === "admin") && <><p className="sidebar-label sidebar-label-settings">設定</p><nav className="sidebar-nav"><button className={appView === "members" ? "active" : ""} type="button" onClick={() => setAppView("members")}><UsersRound size={17} aria-hidden="true" />成員與權限</button><button className={appView === "appearance" ? "active" : ""} type="button" onClick={() => setAppView("appearance")}><Palette size={17} aria-hidden="true" />收據樣式</button></nav></>}
@@ -535,7 +549,8 @@ export default function Home() {
         <section className="app-content">
           {appView === "dashboard" && <DashboardView receipts={savedReceipts} user={user} onCreate={startReceipt} />}
           {appView === "ledger" && <LedgerView canCreate={user.organization.role !== "viewer"} currency={user.organization.currency} entries={ledgerEntries} onSave={saveLedgerEntry} summary={ledgerSummary} />}
-          {appView === "receipts" && <ReceiptsView currency={user.organization.currency} receipts={savedReceipts} canCreate={user.organization.role !== "viewer"} onCreate={startReceipt} />}
+          {appView === "receipts" && <ReceiptsView currency={user.organization.currency} receipts={savedReceipts} canCreate={user.organization.role !== "viewer"} onConfirmPayment={confirmReceiptPayment} onCreate={startReceipt} />}
+          {appView === "quotes" && <QuotationWorkspace canManage={user.organization.role !== "viewer"} canManageCompany={user.organization.role === "owner" || user.organization.role === "admin"} organization={user.organization} onOpenReceipts={() => setAppView("receipts")} onOrganizationUpdated={(organization) => setUser((current) => current ? { ...current, organization: { ...current.organization, ...organization } } : current)} />}
           {appView === "members" && (user.organization.role === "owner" || user.organization.role === "admin") && <section className="page-view no-print"><MemberManagement actorId={user.id} actorRole={user.organization.role} allowAdmin={user.organization.role === "owner"} onClose={() => setAppView("dashboard")} /></section>}
           {appView === "appearance" && (user.organization.role === "owner" || user.organization.role === "admin") && <ReceiptAppearanceSettings currency={user.organization.currency} logoUrl={companyLogoUrl} sealUrl={companySealUrl} organization={user.organization} onClose={() => setAppView("dashboard")} onSave={saveReceiptTemplate} onSealUploaded={markSealUploaded} />}
           {appView === "create" && <section className="workspace">
@@ -910,7 +925,7 @@ function LedgerView({ canCreate, currency, entries, onSave, summary }: { canCrea
 }
 
 function DashboardView({ receipts, user, onCreate }: { receipts: SavedReceipt[]; user: SessionUser; onCreate: () => void }) {
-  const total = receipts.reduce((sum, receipt) => sum + receipt.amount, 0);
+  const total = receipts.filter((receipt) => receipt.paymentStatus !== "pending").reduce((sum, receipt) => sum + receipt.amount, 0);
   return <section className="page-view dashboard-view no-print" aria-labelledby="dashboard-title">
     <div className="page-heading"><div><p className="eyebrow">OVERVIEW</p><h2 id="dashboard-title">早安，{user.name}</h2><p>這裡是 {user.organization.name} 的日常營運概況。</p></div></div>
     <div className="metric-grid"><article><span>最近收據</span><strong>{receipts.length}</strong><small>目前顯示最近 20 筆</small></article><article><span>最近收款總額</span><strong>{user.organization.currency} {formatAmount(String(total))}</strong><small>以已儲存收據計算</small></article><article><span>你的權限</span><strong>{roleLabel(user.organization.role)}</strong><small>{user.organization.role === "viewer" ? "可查看收據與報表" : "可處理日常收據作業"}</small></article></div>
@@ -919,9 +934,9 @@ function DashboardView({ receipts, user, onCreate }: { receipts: SavedReceipt[];
   </section>;
 }
 
-function ReceiptsView({ currency, receipts, canCreate, onCreate }: { currency: string; receipts: SavedReceipt[]; canCreate: boolean; onCreate: () => void }) {
-  return <section className="page-view receipts-view no-print" aria-labelledby="receipts-title"><div className="page-heading"><div><p className="eyebrow">RECEIPT CENTER</p><h2 id="receipts-title">收據中心</h2><p>查看這間公司的最近收據，新增與編輯工作集中在同一處。</p></div>{canCreate && <button className="page-primary-action" type="button" onClick={onCreate}><Plus size={17} aria-hidden="true" />新增收據</button>}</div>
-    <section className="receipts-table-card">{receipts.length ? <div className="receipt-table-list"><div className="receipt-table-header"><span>收據編號</span><span>付款人</span><span>開立日期</span><span>金額</span></div>{receipts.map((receipt) => <div className="receipt-table-row" key={receipt.id}><strong>{receipt.receiptNumber}</strong><span>{receipt.payerName}</span><span>{receipt.issueDate}</span><b>{currency} {formatAmount(String(receipt.amount))}</b></div>)}</div> : <EmptyReceipts onCreate={onCreate} canCreate={canCreate} />}</section>
+function ReceiptsView({ currency, receipts, canCreate, onConfirmPayment, onCreate }: { currency: string; receipts: SavedReceipt[]; canCreate: boolean; onConfirmPayment: (receipt: SavedReceipt) => void; onCreate: () => void }) {
+  return <section className="page-view receipts-view no-print" aria-labelledby="receipts-title"><div className="page-heading"><div><p className="eyebrow">RECEIPT CENTER</p><h2 id="receipts-title">收據中心</h2><p>由報價單建立的收據草稿會先標示為待收款；確認收款後才會列為收入。</p></div>{canCreate && <button className="page-primary-action" type="button" onClick={onCreate}><Plus size={17} aria-hidden="true" />新增收據</button>}</div>
+    <section className="receipts-table-card">{receipts.length ? <div className="receipt-table-list receipt-table-with-status"><div className="receipt-table-header"><span>收據編號</span><span>付款人</span><span>開立日期</span><span>金額</span><span>收款狀態</span></div>{receipts.map((receipt) => <div className="receipt-table-row" key={receipt.id}><strong>{receipt.receiptNumber}{receipt.sourceQuoteNumber && <small className="ledger-source">來源：{receipt.sourceQuoteNumber}</small>}</strong><span>{receipt.payerName}</span><span>{receipt.issueDate}</span><b>{currency} {formatAmount(String(receipt.amount))}</b><span>{receipt.paymentStatus === "pending" ? <button className="text-button" type="button" onClick={() => onConfirmPayment(receipt)}>確認收款</button> : <em className="receipt-paid">已收款</em>}</span></div>)}</div> : <EmptyReceipts onCreate={onCreate} canCreate={canCreate} />}</section>
   </section>;
 }
 

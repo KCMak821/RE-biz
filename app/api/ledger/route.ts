@@ -18,6 +18,7 @@ type ReceiptIncomeDocument = {
   createdAt: Date;
   issueDate: string;
   organizationId: ObjectId;
+  paymentStatus?: "pending" | "paid";
   payerName: string;
   receiptNumber: string;
 };
@@ -34,18 +35,22 @@ export async function GET() {
     if (!user) return Response.json({ message: "請先登入。" }, { status: 401 });
 
     const organizationId = new ObjectId(user.organization.id);
+    const userId = new ObjectId(user.id);
     const database = await getDatabase();
     const collection = await ledgerCollection();
     const receipts = database.collection<ReceiptIncomeDocument>("receipts");
     const [manualEntries, totals, receiptEntries, receiptTotal] = await Promise.all([
-      collection.find({ organizationId }).sort({ date: -1, createdAt: -1 }).limit(100).toArray(),
+      collection.find({ organizationId, createdBy: userId }).sort({ date: -1, createdAt: -1 }).limit(100).toArray(),
       collection.aggregate<{ _id: "IN" | "OUT"; total: number }>([
-      { $match: { organizationId } },
+      { $match: { organizationId, createdBy: userId } },
       { $group: { _id: "$type", total: { $sum: "$amount" } } },
       ]).toArray(),
-      receipts.find({ organizationId }).sort({ issueDate: -1, createdAt: -1 }).limit(100).toArray(),
+      // Older ordinary receipts did not have a paymentStatus and remain paid
+      // for backwards compatibility. Quote-created drafts are explicitly
+      // pending, so they never become income until confirmation.
+      receipts.find({ organizationId, createdBy: userId, paymentStatus: { $ne: "pending" } }).sort({ issueDate: -1, createdAt: -1 }).limit(100).toArray(),
       receipts.aggregate<{ total: number }>([
-        { $match: { organizationId } },
+        { $match: { organizationId, createdBy: userId, paymentStatus: { $ne: "pending" } } },
         { $group: { _id: null, total: { $sum: "$amount" } } },
       ]).toArray(),
     ]);
