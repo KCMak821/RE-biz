@@ -215,6 +215,18 @@ async function writePlatformAuditLog(input: Omit<PlatformAuditLogDocument, "crea
   await (await getDatabase()).collection<PlatformAuditLogDocument>("platformAuditLogs").insertOne({ ...input, createdAt: new Date() });
 }
 
+async function writePlatformAuditLogBestEffort(input: Omit<PlatformAuditLogDocument, "createdAt">) {
+  try {
+    await writePlatformAuditLog(input);
+  } catch (error) {
+    // The local MongoDB deployment is a standalone server, so transactions
+    // cannot be assumed. The business mutation is the source of truth: never
+    // report it as failed solely because its non-sensitive audit write failed.
+    const reason = error instanceof Error ? error.message : "Unknown audit write error";
+    console.error(`Platform audit log write failed after a successful mutation: action=${input.action} targetType=${input.targetType} targetId=${input.targetId} reason=${reason}`);
+  }
+}
+
 export async function updateWorkspaceStatus(actor: Pick<PlatformAdminActor, "id">, workspaceId: string, status: WorkspaceStatus) {
   if (!ObjectId.isValid(workspaceId)) return false;
   await preparePlatformAdminCollections();
@@ -222,7 +234,7 @@ export async function updateWorkspaceStatus(actor: Pick<PlatformAdminActor, "id"
     { _id: new ObjectId(workspaceId) }, { $set: { status } },
   );
   if (!result.matchedCount) return false;
-  await writePlatformAuditLog({
+  await writePlatformAuditLogBestEffort({
     action: status === "suspended" ? "WORKSPACE_SUSPENDED" : "WORKSPACE_REACTIVATED",
     actorUserId: new ObjectId(actor.id), targetId: workspaceId, targetType: "workspace",
   });
@@ -240,7 +252,7 @@ export async function updateWorkspaceFeature(actor: Pick<PlatformAdminActor, "id
     { $set: { enabled, updatedAt: new Date() }, $setOnInsert: { createdAt: new Date() } },
     { upsert: true },
   );
-  await writePlatformAuditLog({
+  await writePlatformAuditLogBestEffort({
     action: enabled ? "FEATURE_ENABLED" : "FEATURE_DISABLED", actorUserId: new ObjectId(actor.id),
     metadata: { enabled, featureKey }, targetId: `${workspaceId}:${featureKey}`, targetType: "workspace_feature",
   });
@@ -254,7 +266,7 @@ export async function updatePlatformUserStatus(actor: Pick<PlatformAdminActor, "
     { _id: new ObjectId(userId) }, { $set: { accountStatus: status } },
   );
   if (!result.matchedCount) return false;
-  await writePlatformAuditLog({
+  await writePlatformAuditLogBestEffort({
     action: status === "disabled" ? "USER_DISABLED" : "USER_ENABLED",
     actorUserId: new ObjectId(actor.id), targetId: userId, targetType: "user",
   });
