@@ -172,12 +172,14 @@ export function ReceiptCreate() {
     setCreated({ count: result.count, numbers: result.numbers });
     setPrintQueue(numbered);
     setPrintQueueSource("batch");
-    const a4Pages = batchPrintLayout === "paper-saving" ? Math.ceil(result.count / 2) : result.count;
+    const a4Pages = Math.ceil(result.count / receiptsPerPage(batchPrintLayout));
     notify.success(
       `已建立 ${result.count} 張收據`,
-      batchPrintLayout === "paper-saving"
+      batchPrintLayout === "standard"
+        ? "接下來會開啟列印視窗，每張收據各自一頁。"
+        : batchPrintLayout === "paper-saving"
         ? `接下來會開啟列印視窗，預計使用 ${a4Pages} 張 A4。`
-        : "接下來會開啟列印視窗，每張收據各自一頁。",
+        : `接下來會開啟 A4 橫式列印視窗，預計使用 ${a4Pages} 張 A4。`,
     );
     window.setTimeout(() => window.print(), 150);
   }
@@ -284,7 +286,7 @@ export function ReceiptCreate() {
   const paymentSelectValue = paymentMethodSelectValue(draft.paymentMethod);
   const rowCount = batchRowCount(batchText);
   const batchReceiptCount = printQueueSource === "batch" && created ? printQueue.length : rowCount;
-  const batchA4Pages = batchPrintLayout === "paper-saving" ? Math.ceil(batchReceiptCount / 2) : batchReceiptCount;
+  const batchA4Pages = Math.ceil(batchReceiptCount / receiptsPerPage(batchPrintLayout));
 
   return (
     <div className="page page-wide">
@@ -662,24 +664,27 @@ export function ReceiptCreate() {
                 >
                   <option value="standard">標準版：每頁 1 張 A4 收據</option>
                   <option value="paper-saving">節省紙張版：每頁 2 張收據</option>
+                  <option value="ultra-saving">超節省紙張版：每頁 4 張收據</option>
                 </select>
               </label>
               <p className="field-hint" style={{ fontSize: 13 }}>
                 {batchPrintLayout === "paper-saving"
                   ? "每張 A4 直式紙會上下排列兩張橫向收據，中央標示裁切線。"
-                  : "每張收據各自使用一張 A4，沿用既有的單張版型。"}
+                  : batchPrintLayout === "ultra-saving"
+                    ? "每張 A4 橫式紙會以 2 × 2 排列四張迷你收據，並以裁切線分隔。內容較長時會改顯示安全提示。"
+                    : "每張收據各自使用一張 A4，沿用既有的單張版型。"}
               </p>
               <p className="lines-total" style={{ marginTop: 12 }}>
                 <strong>{batchReceiptCount}</strong> 張收據
                 <span>預估使用 <strong>{batchA4Pages}</strong> 張 A4</span>
               </p>
-              {batchPrintLayout === "paper-saving" && previewBatch.receipts.length ? (
+              {batchPrintLayout !== "standard" && previewBatch.receipts.length ? (
                 <BatchReceiptPrint
                   currency={currency}
-                  layout="paper-saving"
+                  layout={batchPrintLayout}
                   logoUrl={logoUrl}
                   preview
-                  receipts={previewBatch.receipts.slice(0, 2)}
+                  receipts={previewBatch.receipts.slice(0, receiptsPerPage(batchPrintLayout))}
                   sealUrl={sealUrl}
                   template={organization.receiptTemplate}
                 />
@@ -717,4 +722,9 @@ export function ReceiptCreate() {
       </div>
     </div>
   );
+}
+
+function receiptsPerPage(layout: BatchPrintLayout) {
+  if (layout === "ultra-saving") return 4;
+  return layout === "paper-saving" ? 2 : 1;
 }

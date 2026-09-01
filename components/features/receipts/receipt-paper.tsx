@@ -190,7 +190,7 @@ function uploadedSignatureLayoutStyle(template: ReceiptTemplate, variant: "compa
   };
 }
 
-function CompanySeal({ chineseName, englishName }: { chineseName: string; englishName: string }) {
+export function CompanySeal({ chineseName, englishName }: { chineseName: string; englishName: string }) {
   const chineseLines = chineseName.endsWith("工作室")
     ? [chineseName.slice(0, -3), "工作室"]
     : [chineseName.slice(0, Math.ceil(chineseName.length / 2)), chineseName.slice(Math.ceil(chineseName.length / 2))];

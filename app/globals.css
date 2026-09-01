@@ -968,6 +968,40 @@ a { color: var(--forest); }
 .receipt-print-page--single { grid-template-rows: minmax(0, 1fr) 13px minmax(0, 1fr); }
 .receipt-cut-guide { display: grid; align-items: center; grid-template-columns: 1fr auto 1fr; gap: 9px; color: #a3a8a4; font-size: 8px; letter-spacing: .08em; text-align: center; }
 .receipt-cut-guide::before, .receipt-cut-guide::after { height: 1px; border-top: 1px dashed #b7bcb8; content: ""; }
+.receipt-print-page--ultra-saving { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 5mm minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) 5mm minmax(0, 1fr); box-sizing: border-box; width: min(100%, 297mm); aspect-ratio: 297 / 210; margin: 0 auto; background: #fff; }
+.mini-receipt { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto auto auto; align-content: start; min-width: 0; min-height: 0; box-sizing: border-box; border: 1px solid #cbd3c9; background: #fff; padding: 4mm 4.5mm; color: #26352e; overflow-wrap: anywhere; }
+.mini-receipt--0 { grid-column: 1; grid-row: 1; }
+.mini-receipt--1 { grid-column: 3; grid-row: 1; }
+.mini-receipt--2 { grid-column: 1; grid-row: 3; }
+.mini-receipt--3 { grid-column: 3; grid-row: 3; }
+.mini-receipt-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; border-bottom: 2px solid var(--mini-receipt-accent, var(--forest)); padding-bottom: 5px; }
+.mini-receipt-header > div { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.mini-receipt-header strong { overflow-wrap: anywhere; font-family: var(--font-display); font-size: 12px; line-height: 1.2; }
+.mini-receipt-header b { flex: 0 0 auto; color: var(--mini-receipt-accent, var(--forest)); font-family: Georgia, serif; font-size: 13px; letter-spacing: .05em; }
+.mini-receipt-logo { flex: 0 0 auto; width: auto; max-width: 26px; height: 20px; object-fit: contain; }
+.mini-receipt-meta { display: flex; justify-content: space-between; gap: 8px; padding: 5px 0; color: #5e6863; font-size: 8.5px; font-weight: 700; }
+.mini-receipt-main { display: grid; gap: 5px; align-content: start; }
+.mini-receipt-main p, .mini-receipt-notes p { margin: 0; font-size: 10px; line-height: 1.35; white-space: pre-wrap; }
+.mini-receipt-main small, .mini-receipt-notes small { display: inline-block; min-width: 43px; margin-right: 5px; color: #68766d; font-size: 8px; font-weight: 700; letter-spacing: .04em; }
+.mini-receipt-total { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-top: 6px; border-top: 1px solid #d6ddd4; border-bottom: 1px solid #d6ddd4; background: #f4f7f1; padding: 5px 6px; color: var(--mini-receipt-accent, var(--forest)); }
+.mini-receipt-total span { font-size: 8px; font-weight: 700; }
+.mini-receipt-total strong { font-size: 14px; }
+.mini-receipt-notes { display: grid; gap: 3px; margin-top: 5px; }
+.mini-signature-block { justify-self: end; width: 96px; margin-top: 6px; text-align: center; }
+.mini-signature-field { position: relative; height: 28px; }
+.mini-signature-line { position: absolute; right: 0; bottom: 0; left: 0; border-top: 1px solid #56645c; }
+.mini-signature-block > span { display: block; margin-top: 3px; color: #6d7771; font-size: 6.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.mini-signature-slot { position: absolute; top: 0; bottom: 5px; left: calc(50% + var(--mini-signature-offset-x)); width: var(--mini-signature-scale); transform: translateX(-50%); }
+.mini-signature-slot img { display: block; width: 100%; height: 100%; object-fit: contain; object-position: 50% calc(50% + var(--mini-signature-offset-y)); }
+.mini-signature-field .company-seal { position: absolute; right: 31px; bottom: 4px; width: 30px; height: 30px; margin: 0; transform: none; }
+.mini-receipt--warning { display: grid; align-content: center; gap: 8px; border: 1px solid #d7b871; background: #fffaf0; padding: 9mm; color: #704e15; }
+.mini-receipt--warning p { margin: 0; }
+.mini-receipt--warning .mini-receipt-company { color: #4a3820; font-size: 12px; font-weight: 700; }
+.mini-receipt--warning .mini-receipt-number { font-size: 10px; }
+.mini-receipt--warning strong { font-size: 12px; line-height: 1.55; }
+.mini-cut-guide { z-index: 1; pointer-events: none; }
+.mini-cut-guide--vertical { grid-column: 2; grid-row: 1 / 4; border-left: 1px dashed #b7bcb8; }
+.mini-cut-guide--horizontal { grid-column: 1 / 4; grid-row: 2; border-top: 1px dashed #b7bcb8; }
 .template-minimal { border: 1px solid #e0e2dd; box-shadow: none; }
 .template-minimal .receipt-topline { height: 3px; }
 .template-minimal .receipt-header { border-bottom-color: #e4e6e2; }
@@ -1094,6 +1128,7 @@ a { color: var(--forest); }
 @media print {
   /* No browser margin means Chrome has no header/footer area for the date, URL and page number. */
   @page { size: A4; margin: 0; }
+  @page ultra-saving { size: A4 landscape; margin: 0; }
 
   body { background: #fff; }
   .no-print, .shell-topbar, .shell-sidebar, .drawer { display: none !important; }
@@ -1149,6 +1184,18 @@ a { color: var(--forest); }
   }
   .receipt-print-page--paper-saving > .receipt-paper--compact { padding: 4.2mm 5mm 3.8mm; }
   .receipt-print-page--paper-saving .receipt-cut-guide { break-inside: avoid; page-break-inside: avoid; }
+
+  .receipt-print-page--ultra-saving {
+    width: 297mm;
+    height: 210mm;
+    aspect-ratio: auto;
+    margin: 0;
+    page: ultra-saving;
+    break-after: page;
+    page-break-after: always;
+  }
+  .receipt-print-page--ultra-saving:last-child { break-after: auto; page-break-after: auto; }
+  .mini-receipt { break-inside: avoid; page-break-inside: avoid; }
 
   .quote-paper { width: 100%; max-width: none; min-height: auto; margin: 0; padding: 20mm 18mm; box-shadow: none; }
   .quote-paper-table thead { display: table-header-group; }
