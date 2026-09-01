@@ -9,6 +9,8 @@ import { after, before, test } from "node:test";
 
 import { MongoClient, ObjectId } from "mongodb";
 
+import { stopChildProcess } from "./child-process.mjs";
+
 const repositoryRoot = resolve(
   fileURLToPath(new URL("../../", import.meta.url)),
 );
@@ -296,27 +298,26 @@ before(async () => {
 });
 
 after(async () => {
-  if (nextProcess && !nextProcess.killed) {
-    if (process.platform === "win32") {
-      const taskkill = spawn(
-        "taskkill",
-        ["/PID", String(nextProcess.pid), "/T", "/F"],
-        { stdio: "ignore" },
-      );
-      await Promise.race([
-        once(taskkill, "exit"),
-        new Promise((resolveDelay) => setTimeout(resolveDelay, 5_000)),
-      ]);
-    } else {
-      nextProcess.kill("SIGTERM");
-      await Promise.race([
-        once(nextProcess, "exit"),
-        new Promise((resolveDelay) => setTimeout(resolveDelay, 5_000)),
-      ]);
+  let cleanupError;
+  try {
+    if (!(await stopChildProcess(nextProcess)))
+      cleanupError = new Error("Next.js integration server did not stop.");
+  } catch (error) {
+    cleanupError = error;
+  }
+  if (databaseConnected) {
+    try {
+      await database.dropDatabase();
+    } catch (error) {
+      cleanupError ??= error;
     }
   }
-  if (databaseConnected) await database.dropDatabase();
-  await client.close().catch(() => undefined);
+  try {
+    await client.close();
+  } catch (error) {
+    cleanupError ??= error;
+  }
+  if (cleanupError) throw cleanupError;
 });
 
 test(

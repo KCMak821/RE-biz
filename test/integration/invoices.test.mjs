@@ -9,11 +9,13 @@ import { after, before, test } from "node:test";
 
 import { MongoClient, ObjectId } from "mongodb";
 
+import { stopChildProcess } from "./child-process.mjs";
+
 const root = resolve(fileURLToPath(new URL("../../", import.meta.url)));
 const mongoUri = process.env.TEST_MONGODB_URI || "mongodb://127.0.0.1:27018";
 const client = new MongoClient(mongoUri, { serverSelectionTimeoutMS: 10_000 });
 const database = client.db(`receipt_issuer_invoice_test_${process.pid}_${randomBytes(6).toString("hex")}`);
-let baseUrl = ""; let server; let fixture;
+let baseUrl = ""; let server; let fixture; let databaseConnected = false;
 const customerPayload = (overrides = {}) => ({ address: "Address A", businessRegistration: "BR-A", companyName: "Invoice Customer", contact: "Mia", email: "mia@example.test", name: "Mia Co", notes: "", phone: "123", ...overrides });
 const invoicePayload = (customerId, overrides = {}) => ({ customerId, dueDate: "2026-09-30", issueDate: "2026-08-31", lines: [{ description: "", discountAmount: 5, name: "Service", quantity: 2, unitPrice: 100 }], notes: "Invoice note", terms: "30 days", ...overrides });
 const quotePayload = (customerId, overrides = {}) => ({ customer: customerPayload(), customerId, issueDate: "2026-08-31", lines: [{ description: "", discountAmount: 0, name: "Quoted service", quantity: 1, unitPrice: 100 }], notes: "Quote note", terms: "Quote terms", validUntil: "2026-09-30", ...overrides });
@@ -24,7 +26,7 @@ async function request(path, { body, method = "GET", token } = {}) { const respo
 async function session(userId) { const token = randomBytes(32).toString("base64url"); await database.collection("sessions").insertOne({ expiresAt: new Date(Date.now() + 3600_000), tokenHash: hash(token), userId }); return token; }
 
 before(async () => {
-  await client.connect(); await database.dropDatabase(); const now = new Date(); const owner = new ObjectId(); const operator = new ObjectId(); const viewer = new ObjectId(); const tenantB = new ObjectId(); const workspace = new ObjectId(); const workspaceB = new ObjectId();
+  await client.connect(); databaseConnected = true; await database.dropDatabase(); const now = new Date(); const owner = new ObjectId(); const operator = new ObjectId(); const viewer = new ObjectId(); const tenantB = new ObjectId(); const workspace = new ObjectId(); const workspaceB = new ObjectId();
   await database.collection("users").insertMany([owner, operator, viewer, tenantB].map((id, index) => ({ _id: id, accountStatus: "active", createdAt: now, email: `invoice-${index}@example.test`, name: `User ${index}`, passwordHash: "unused", platformRole: "USER" })));
   await database.collection("organizations").insertMany([{ _id: workspace, address: "Company Address A", bankDetails: "Bank A", createdAt: now, createdBy: owner, currency: "HKD", name: "Workspace A", status: "active", timeZone: "Asia/Hong_Kong" }, { _id: workspaceB, createdAt: now, createdBy: tenantB, currency: "HKD", name: "Workspace B", status: "active", timeZone: "Asia/Hong_Kong" }]);
   await database.collection("memberships").insertMany([{ createdAt: now, createdBy: owner, organizationId: workspace, role: "owner", status: "active", userId: owner }, { createdAt: now, createdBy: owner, organizationId: workspace, role: "operator", status: "active", userId: operator }, { createdAt: now, createdBy: owner, organizationId: workspace, role: "viewer", status: "active", userId: viewer }, { createdAt: now, createdBy: tenantB, organizationId: workspaceB, role: "owner", status: "active", userId: tenantB }]);
@@ -32,7 +34,28 @@ before(async () => {
   const available = await port(); baseUrl = `http://127.0.0.1:${available}`; server = spawn(process.execPath, [resolve(root, "node_modules", "next", "dist", "bin", "next"), "dev", "--webpack", "--hostname", "127.0.0.1", "--port", String(available)], { cwd: root, env: { ...process.env, MONGODB_DB: database.databaseName, MONGODB_URI: mongoUri, NEXT_TELEMETRY_DISABLED: "1" }, stdio: "ignore" });
   assert.equal(await waitFor(async () => { try { return (await fetch(`${baseUrl}/api/auth/session`)).status === 200; } catch { return false; } }), true);
 });
-after(async () => { if (server && !server.killed) { const killer = spawn("taskkill", ["/PID", String(server.pid), "/T", "/F"], { stdio: "ignore" }); await once(killer, "exit").catch(() => undefined); } await database.dropDatabase(); await client.close(); });
+after(async () => {
+  let cleanupError;
+  try {
+    if (!(await stopChildProcess(server)))
+      cleanupError = new Error("Next.js integration server did not stop.");
+  } catch (error) {
+    cleanupError = error;
+  }
+  if (databaseConnected) {
+    try {
+      await database.dropDatabase();
+    } catch (error) {
+      cleanupError ??= error;
+    }
+  }
+  try {
+    await client.close();
+  } catch (error) {
+    cleanupError ??= error;
+  }
+  if (cleanupError) throw cleanupError;
+});
 
 test("manual invoice snapshots, draft workflow, sent lock, overdue and void", { concurrency: false }, async () => {
   const customer = (await request("/api/customers", { body: customerPayload(), method: "POST", token: fixture.owner })).body.customer;
