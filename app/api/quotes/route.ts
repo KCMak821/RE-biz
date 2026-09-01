@@ -46,7 +46,8 @@ export async function GET(request: Request) {
     const keyword = searchParams.get("q")?.trim().slice(0, 100) ?? "";
     const requestedStatus = searchParams.get("status");
     const today = new Date().toISOString().slice(0, 10);
-    const filter: Record<string, unknown> = { organizationId: new ObjectId(user.organization.id), createdBy: new ObjectId(user.id) };
+    const baseFilter = { organizationId: new ObjectId(user.organization.id), createdBy: new ObjectId(user.id) };
+    const filter: Record<string, unknown> = { ...baseFilter };
     if (requestedStatus === "expired") filter.validUntil = { $lt: today };
     else if (["draft", "sent", "accepted", "rejected"].includes(requestedStatus ?? "")) {
       filter.status = requestedStatus;
@@ -56,8 +57,12 @@ export async function GET(request: Request) {
       const expression = new RegExp(escapedRegex(keyword), "i");
       filter.$or = [{ quoteNumber: expression }, { "customerSnapshot.name": expression }, { "customerSnapshot.contact": expression }];
     }
-    const quotes = await (await quotesCollection()).find(filter).sort({ issueDate: -1, createdAt: -1 }).limit(200).toArray();
-    return Response.json({ quotes: quotes.map(serialize) });
+    const collection = await quotesCollection();
+    const [quotes, total] = await Promise.all([
+      collection.find(filter).sort({ issueDate: -1, createdAt: -1 }).limit(200).toArray(),
+      collection.countDocuments(baseFilter),
+    ]);
+    return Response.json({ quotes: quotes.map(serialize), total });
   } catch {
     return Response.json({ message: "無法讀取報價單。" }, { status: 503 });
   }

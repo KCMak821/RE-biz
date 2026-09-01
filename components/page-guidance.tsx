@@ -18,5 +18,5 @@ export function FirstUseGuide({
 }
 
 export function FieldHelp({ children }: { children: ReactNode }) {
-  return <p className="field-hint">{children}</p>;
+  return <small className="field-hint">{children}</small>;
 }

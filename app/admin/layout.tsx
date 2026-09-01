@@ -12,18 +12,18 @@ export default async function AdminLayout({ children }: Readonly<{ children: Rea
 
   return <main className="admin-shell">
     <header className="admin-topbar">
-      <Link className="admin-brand" href="/admin">RE-Biz <span>Platform Admin</span></Link>
+      <Link className="admin-brand" href="/admin">RE-Biz <span>平台管理</span></Link>
       <div className="admin-actor"><strong>{user.name}</strong><span>{user.email}</span></div>
     </header>
     <div className="admin-layout">
       <aside className="admin-sidebar" aria-label="平台管理導覽">
-        <p>PLATFORM</p>
+        <p>平台管理</p>
         <nav>
-          <Link href="/admin">Overview</Link>
-          <Link href="/admin/workspaces">Workspaces</Link>
-          <Link href="/admin/users">Users</Link>
-          <Link href="/admin/usage">Usage</Link>
-          <Link href="/admin/audit-logs">Audit Logs</Link>
+          <Link href="/admin">總覽</Link>
+          <Link href="/admin/workspaces">Workspace 管理</Link>
+          <Link href="/admin/users">使用者</Link>
+          <Link href="/admin/usage">使用概況</Link>
+          <Link href="/admin/audit-logs">操作紀錄</Link>
         </nav>
         <Link className="admin-back-link" href="/">← 返回工作區</Link>
       </aside>

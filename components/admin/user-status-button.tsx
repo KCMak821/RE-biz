@@ -19,5 +19,5 @@ export function UserStatusButton({ currentStatus, userId }: { currentStatus: "ac
     router.refresh();
   }
 
-  return <span className="admin-user-action"><button className={nextStatus === "disabled" ? "admin-table-danger" : ""} disabled={pending} type="button" onClick={() => void updateStatus()}>{pending ? "處理中…" : nextStatus === "disabled" ? "Disable" : "Enable"}</button>{message && <small role="status">{message}</small>}</span>;
+  return <span className="admin-user-action"><button className={nextStatus === "disabled" ? "admin-table-danger" : ""} disabled={pending} type="button" onClick={() => void updateStatus()}>{pending ? "處理中…" : nextStatus === "disabled" ? "停用" : "啟用"}</button>{message && <small role="status">{message}</small>}</span>;
 }

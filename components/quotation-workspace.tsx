@@ -201,6 +201,9 @@ export function QuotationWorkspace({
   const [keyword, setKeyword] = useState("");
   const [status, setStatus] = useState("all");
   const [message, setMessage] = useState("");
+  const [isQuotesLoading, setIsQuotesLoading] = useState(true);
+  const [quotesLoaded, setQuotesLoaded] = useState(false);
+  const [totalQuotes, setTotalQuotes] = useState<number | null>(null);
 
   async function loadCustomers() {
     const data = await request<{ customers: Customer[] }>("/api/customers");
@@ -247,13 +250,19 @@ export function QuotationWorkspace({
       const query = new URLSearchParams();
       if (keyword.trim()) query.set("q", keyword.trim());
       if (status !== "all") query.set("status", status);
-      void request<{ quotes: Quote[] }>(`/api/quotes?${query}`)
-        .then((data) => setQuotes(data.quotes ?? []))
+      setIsQuotesLoading(true);
+      void request<{ quotes: Quote[]; total: number }>(`/api/quotes?${query}`)
+        .then((data) => {
+          setQuotes(data.quotes ?? []);
+          setTotalQuotes(data.total);
+          setQuotesLoaded(true);
+        })
         .catch((error: unknown) =>
           setMessage(
             error instanceof Error ? error.message : "無法讀取報價單。",
           ),
-        );
+        )
+        .finally(() => setIsQuotesLoading(false));
     }, 0);
     return () => window.clearTimeout(timer);
   }, [screen, keyword, status]);
@@ -263,6 +272,10 @@ export function QuotationWorkspace({
     setReceipt(null);
     setScreen("editor");
     setMessage("");
+  }
+  function returnToQuoteList() {
+    setIsQuotesLoading(true);
+    setScreen("list");
   }
   async function duplicateQuote() {
     if (!selected) return;
@@ -341,7 +354,7 @@ export function QuotationWorkspace({
         invoice={invoice}
         canManage={canManage}
         message={message}
-        onBack={() => setScreen("list")}
+        onBack={returnToQuoteList}
         onCreateInvoice={() => void createInvoice()}
         onDuplicate={() => void duplicateQuote()}
         onEdit={() => {
@@ -358,7 +371,7 @@ export function QuotationWorkspace({
       <CustomerManager
         canManage={canManage}
         message={message}
-        onBack={() => setScreen("list")}
+        onBack={returnToQuoteList}
         onChanged={() => {
           void loadCustomers();
           setMessage("客戶資料已更新。");
@@ -372,7 +385,7 @@ export function QuotationWorkspace({
         canManage={canManage}
         items={items}
         message={message}
-        onBack={() => setScreen("list")}
+        onBack={returnToQuoteList}
         onChanged={() => {
           void loadItems();
           setMessage("常用品項已更新。");
@@ -385,7 +398,7 @@ export function QuotationWorkspace({
         canManage={canManageCompany}
         initial={organization}
         message={message}
-        onBack={() => setScreen("list")}
+        onBack={returnToQuoteList}
         onSaved={(next) => {
           onOrganizationUpdated(next);
           setMessage("公司資料已更新；新報價單會使用這份資料快照。");
@@ -403,7 +416,7 @@ export function QuotationWorkspace({
           <p className="eyebrow">QUOTATION CENTER</p>
           <h2 id="quotes-title">報價單</h2>
           <p>
-            交易前的報價文件；建立收據草稿前，客戶必須接受且報價仍在有效期內。
+            建立、發送及追蹤交易前的報價文件；客戶接受且報價仍在有效期內後，可建立請款單。
           </p>
         </div>
         {canManage && (
@@ -417,7 +430,7 @@ export function QuotationWorkspace({
           </button>
         )}
       </div>
-      {!quotes.length && canManage && <FirstUseGuide title="第一次使用報價單？" steps={["建立或選擇客戶", "加入商品或服務，確認數量與價格", "設定有效期限後儲存草稿", "發送給客戶並在確認接受後建立請款單"]} />}
+      {quotesLoaded && !isQuotesLoading && totalQuotes === 0 && canManage && <FirstUseGuide title="第一次使用報價單？" steps={["建立或選擇客戶", "加入商品或服務，確認數量與價格", "設定有效期限後儲存草稿", "發送給客戶並在確認接受後建立請款單"]} />}
       <div className="quotation-tools">
         <label className="field">
           <span>搜尋</span>
@@ -480,7 +493,9 @@ export function QuotationWorkspace({
       </div>
       {message && <p className="validation-message">{message}</p>}
       <section className="receipts-table-card quotation-list-card">
-        {quotes.length ? (
+        {isQuotesLoading ? (
+          <p className="list-loading" role="status">正在載入報價單…</p>
+        ) : quotes.length ? (
           <div className="quotation-table-list">
             <div className="quotation-table-header">
               <span>報價單號</span>
@@ -509,16 +524,18 @@ export function QuotationWorkspace({
               </button>
             ))}
           </div>
-        ) : (
+        ) : totalQuotes === null ? null : (
           <div className="empty-receipts">
             <FilePlus2 size={28} />
-            <h3>還沒有建立任何報價單</h3>
+            <h3>{totalQuotes === 0 ? "還沒有建立任何報價單" : "找不到符合目前條件的報價單"}</h3>
             <p>
-              {canManage
-                ? "建立第一張交易前報價單，並在客戶接受後才建立待收款收據草稿。"
-                : "目前沒有可查看的報價單。"}
+              {totalQuotes === 0
+                ? canManage
+                  ? "建立第一張交易前報價單，客戶接受後可轉為請款單。"
+                  : "目前沒有可查看的報價單。"
+                : "嘗試清除搜尋文字或切換為全部狀態。"}
             </p>
-            {canManage && (
+            {totalQuotes === 0 && canManage && (
               <button className="text-button" type="button" onClick={newQuote}>
                 建立第一張報價單
               </button>

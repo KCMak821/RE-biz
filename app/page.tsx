@@ -955,7 +955,8 @@ function SavedReceiptList({ currency, receipts }: { currency: string; receipts: 
 function LedgerView({ canCreate, currency, entries, onSave, summary }: { canCreate: boolean; currency: string; entries: LedgerEntry[]; onSave: (entry: LedgerEntryForm) => Promise<string | null>; summary: LedgerSummary }) {
   const [form, setForm] = useState<LedgerEntryForm>(newLedgerEntry);
   const [isSaving, setIsSaving] = useState(false);
-  const [message, setMessage] = useState("");
+  const [errorMessage, setErrorMessage] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
   const [submitted, setSubmitted] = useState(false);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -965,16 +966,17 @@ function LedgerView({ canCreate, currency, entries, onSave, summary }: { canCrea
     if (!form.date || !form.description.trim() || !Number.isFinite(amount) || amount <= 0) return;
 
     setIsSaving(true);
-    setMessage("");
+    setErrorMessage("");
+    setSuccessMessage("");
     const error = await onSave({ ...form, description: form.description.trim() });
     setIsSaving(false);
     if (error) {
-      setMessage(error);
+      setErrorMessage(error);
       return;
     }
     setForm(newLedgerEntry());
     setSubmitted(false);
-    setMessage("已儲存收支紀錄。");
+    setSuccessMessage("已儲存收支紀錄，並顯示在右側紀錄中。");
   }
 
   return <section className="page-view ledger-view no-print" aria-labelledby="ledger-title">
@@ -991,7 +993,8 @@ function LedgerView({ canCreate, currency, entries, onSave, summary }: { canCrea
           <label className="field full-span"><span>金額（{currency}）<b>*</b></span><input aria-invalid={submitted && (!Number.isFinite(Number(form.amount)) || Number(form.amount) <= 0)} inputMode="decimal" min="0.01" placeholder="0.00" step="0.01" type="number" value={form.amount} onChange={(event) => setForm((current) => ({ ...current, amount: event.target.value }))} /></label>
           {submitted && (!form.date || !form.description.trim() || !Number.isFinite(Number(form.amount)) || Number(form.amount) <= 0) && <p className="validation-message">請填妥日期、說明與大於 0 的金額。</p>}
           <button className="primary-action" disabled={isSaving} type="submit">{isSaving ? "儲存中…" : "儲存收支紀錄"}</button>
-          {message && <p className="save-message" role="status">{message} 儲存後會顯示在右側紀錄中。</p>}
+          {successMessage && <p className="save-message" role="status">{successMessage}</p>}
+          {errorMessage && <p className="validation-message" role="alert">{errorMessage}</p>}
         </form> : <p className="ledger-read-only">你的角色只有檢視權限，可查看所有收支紀錄與餘額。</p>}
       </section>
       <section className="ledger-card ledger-list-card"><div className="card-heading"><div><p className="eyebrow">RECENT ENTRIES</p><h3>收支紀錄</h3></div><span className="ledger-count">顯示最近 {entries.length} 筆</span></div>{entries.length ? <div className="ledger-table-list"><div className="ledger-table-header"><span>類型</span><span>說明</span><span>日期</span><span>金額</span></div>{entries.map((entry) => <div className="ledger-table-row" key={entry.id}><span className={`ledger-type ${entry.type === "IN" ? "income" : "expense"}`}>{entry.type === "IN" ? <ArrowUpRight size={15} aria-hidden="true" /> : <ArrowDownRight size={15} aria-hidden="true" />}{entry.type}</span><strong>{entry.description}{entry.source === "receipt" && <small className="ledger-source">由收據自動帶入</small>}</strong><span>{entry.date}</span><b className={entry.type === "IN" ? "amount-income" : "amount-expense"}>{entry.type === "IN" ? "+" : "−"}{currency} {formatAmount(String(entry.amount))}</b></div>)}</div> : <div className="empty-ledger"><BookOpenText size={28} aria-hidden="true" /><h3>目前還沒有收支紀錄</h3><p>{canCreate ? "從左側新增第一筆收入或支出，儲存後系統會立即統計餘額。" : "目前尚未有可查看的收支紀錄。"}</p></div>}</section>

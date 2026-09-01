@@ -20,14 +20,19 @@ export async function GET(request: Request) {
     if (!await canUseWorkspaceFeature(user, "invoices")) return Response.json({ message: "此工作區目前無法使用請款單功能。" }, { status: 403 });
     const { searchParams } = new URL(request.url); const q = searchParams.get("q")?.trim().slice(0, 100) ?? ""; const status = searchParams.get("status") ?? "all";
     if (!["all", "draft", "unpaid", "overdue", "partially_paid", "paid", "void"].includes(status)) return Response.json({ message: "請款單狀態篩選不正確。" }, { status: 400 });
-    const filter: Record<string, unknown> = { organizationId: new ObjectId(user.organization.id), createdBy: new ObjectId(user.id) };
+    const baseFilter = { organizationId: new ObjectId(user.organization.id), createdBy: new ObjectId(user.id) };
+    const filter: Record<string, unknown> = { ...baseFilter };
     if (status === "draft" || status === "void") filter.status = status;
     else if (status === "paid" || status === "partially_paid") { filter.status = "sent"; filter.paymentStatus = status; }
     else if (status === "unpaid") { filter.status = "sent"; filter.paymentStatus = "unpaid"; filter.dueDate = { $gte: new Date().toISOString().slice(0, 10) }; }
     else if (status === "overdue") { filter.status = "sent"; filter.paymentStatus = "unpaid"; filter.dueDate = { $lt: new Date().toISOString().slice(0, 10) }; }
     if (q) { const expression = new RegExp(escapedRegex(q), "i"); filter.$or = [{ invoiceNumber: expression }, { "customerSnapshot.name": expression }, { "customerSnapshot.companyName": expression }, { "customerSnapshot.contact": expression }]; }
-    const invoices = await (await invoicesCollection()).find(filter).sort({ issueDate: -1, createdAt: -1 }).limit(200).toArray();
-    return Response.json({ invoices: invoices.map(serialize) });
+    const collection = await invoicesCollection();
+    const [invoices, total] = await Promise.all([
+      collection.find(filter).sort({ issueDate: -1, createdAt: -1 }).limit(200).toArray(),
+      collection.countDocuments(baseFilter),
+    ]);
+    return Response.json({ invoices: invoices.map(serialize), total });
   } catch { return Response.json({ message: "無法讀取請款單。" }, { status: 503 }); }
 }
 export async function POST(request: Request) {
