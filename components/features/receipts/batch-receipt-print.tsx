@@ -136,8 +136,15 @@ function UltraSavingPage({
           template={template}
         />
       ))}
-      {page.length >= 2 ? <div aria-hidden="true" className="mini-cut-guide mini-cut-guide--vertical" /> : null}
-      {page.length >= 3 ? <div aria-hidden="true" className="mini-cut-guide mini-cut-guide--horizontal" /> : null}
+      {[1, 2, 3].map((cutIndex) =>
+        page.length > cutIndex ? (
+          <div
+            aria-hidden="true"
+            className={`mini-cut-guide mini-cut-guide--vertical mini-cut-guide--vertical-${cutIndex}`}
+            key={cutIndex}
+          />
+        ) : null,
+      )}
     </section>
   );
 }
