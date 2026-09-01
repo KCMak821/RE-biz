@@ -10,7 +10,7 @@ export function UserStatusButton({ currentStatus, userId }: { currentStatus: "ac
   const nextStatus = currentStatus === "active" ? "disabled" : "active";
 
   async function updateStatus() {
-    if (nextStatus === "disabled" && !window.confirm("Disable this user account? Existing data will not be deleted.")) return;
+    if (nextStatus === "disabled" && !window.confirm("確定要停用此使用者帳號？\n停用後該使用者無法登入；既有 Workspace 資料與平台紀錄不會被刪除。")) return;
     setPending(true); setMessage("");
     const response = await fetch(`/api/admin/users/${userId}/status`, { body: JSON.stringify({ status: nextStatus }), headers: { "content-type": "application/json" }, method: "PATCH" });
     const data = await response.json().catch(() => ({}));

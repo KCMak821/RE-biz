@@ -14,6 +14,8 @@ import {
 } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
+import { FieldHelp, FirstUseGuide } from "@/components/page-guidance";
+
 type Organization = {
   address: string;
   bankDetails: string;
@@ -277,6 +279,12 @@ export function QuotationWorkspace({
   }
   async function changeStatus(next: "sent" | "accepted" | "rejected") {
     if (!selected) return;
+    const consequence = next === "sent"
+      ? "標示後，這張草稿將不能再編輯。"
+      : next === "accepted"
+        ? "確認後，可由這張報價單建立請款單。"
+        : "標示後，這張報價單會保留為已拒絕，無法回到草稿編輯。";
+    if (!window.confirm(`確定要標示為「${statusText(next)}」？\n${consequence}`)) return;
     try {
       const data = await request<{ quote: Quote }>(
         `/api/quotes/${selected.id}`,
@@ -409,6 +417,7 @@ export function QuotationWorkspace({
           </button>
         )}
       </div>
+      {!quotes.length && canManage && <FirstUseGuide title="第一次使用報價單？" steps={["建立或選擇客戶", "加入商品或服務，確認數量與價格", "設定有效期限後儲存草稿", "發送給客戶並在確認接受後建立請款單"]} />}
       <div className="quotation-tools">
         <label className="field">
           <span>搜尋</span>
@@ -503,7 +512,7 @@ export function QuotationWorkspace({
         ) : (
           <div className="empty-receipts">
             <FilePlus2 size={28} />
-            <h3>尚未有報價單</h3>
+            <h3>還沒有建立任何報價單</h3>
             <p>
               {canManage
                 ? "建立第一張交易前報價單，並在客戶接受後才建立待收款收據草稿。"
@@ -700,6 +709,7 @@ function QuoteEditor({
                   </option>
                 ))}
               </select>
+              <FieldHelp>選擇既有客戶會帶入其資料；手動修改後可另存為新的客戶主檔。</FieldHelp>
             </label>
             <QuoteField
               label="公司名稱或客戶姓名"
@@ -844,6 +854,7 @@ function QuoteEditor({
                 setForm((current) => ({ ...current, validUntil: value }))
               }
             />
+            <p className="field-hint full-span">過了有效期限的報價單會顯示為已失效，不能再用來建立請款單。</p>
           </div>
         </fieldset>
         <fieldset className="form-section">
@@ -950,6 +961,7 @@ function QuoteEditor({
                       updateLine(index, "discountAmount", Number(value))
                     }
                   />
+                  {index === 0 && <p className="field-hint full-span">折扣為單一品項的固定金額；小計會自動以數量 × 單價 − 折扣計算。</p>}
                   <output className="quote-line-subtotal">
                     小計 HKD {money(lineTotal(line))}
                   </output>
@@ -1599,7 +1611,7 @@ function CustomerManager({
       )}
       {localMessage && <p className="save-message">{localMessage}</p>}
       <div className="master-list">
-        {customers.map((customer) => (
+        {customers.length ? customers.map((customer) => (
           <article key={customer.id}>
             <div>
               <button
@@ -1653,7 +1665,7 @@ function CustomerManager({
               </div>
             )}
           </article>
-        ))}
+        )) : <div className="empty-receipts"><h3>目前還沒有建立任何客戶</h3><p>{canManage ? "先建立客戶主檔，之後開立報價單時即可快速帶入聯絡資料。" : "目前沒有可查看的客戶資料。"}</p></div>}
       </div>
     </section>
   );
@@ -1700,7 +1712,7 @@ function ItemManager({
     }
   }
   async function remove(id: string) {
-    if (!window.confirm("確定刪除此品項？既有報價單快照不受影響。")) return;
+    if (!window.confirm("確定要刪除此品項？\n刪除後無法再從新報價單帶入；既有報價單仍會保留當時的品項快照。")) return;
     try {
       await request(`/api/items/${id}`, { method: "DELETE" });
       onChanged();
@@ -1777,6 +1789,7 @@ function ItemManager({
               }
             />
           </div>
+          <p className="field-hint">預設單價只會在帶入報價單時使用；停用品項會保留歷史資料，但不會出現在新報價單的選單。</p>
           <div className="master-form-actions">
             <button
               className="text-button"
@@ -1795,8 +1808,9 @@ function ItemManager({
         </form>
       )}
       {localMessage && <p className="save-message">{localMessage}</p>}
+      {!items.length && canManage && <FirstUseGuide title="第一次建立常用品項？" steps={["輸入商品或服務名稱與預設單價", "需要辨識時加上 SKU／內部編號", "啟用品項後，可在報價單明細中快速帶入"]} />}
       <div className="master-list">
-        {items.map((item) => (
+        {items.length ? items.map((item) => (
           <article key={item.id}>
             <div>
               <strong>
@@ -1833,7 +1847,7 @@ function ItemManager({
               </div>
             )}
           </article>
-        ))}
+        )) : <div className="empty-receipts"><h3>目前還沒有建立任何常用品項</h3><p>{canManage ? "建立常用商品或服務，開立報價單時可帶入名稱、描述與預設單價。" : "目前沒有可查看的常用品項。"}</p></div>}
       </div>
     </section>
   );
@@ -1935,6 +1949,7 @@ function CompanyEditor({
               }
             />
           </div>
+          <p className="field-hint">這份資料會帶入日後新開立的報價單；已儲存的歷史報價單不會被改動。</p>
           <button className="primary-action" type="submit">
             儲存公司資料
           </button>

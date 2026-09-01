@@ -12,7 +12,7 @@ export function WorkspaceControls({ features, status, workspaceId }: { features:
 
   async function updateStatus() {
     const nextStatus = status === "active" ? "suspended" : "active";
-    if (nextStatus === "suspended" && !window.confirm("Suspend this workspace? Its data will be retained and its users will be blocked from workspace mutations.")) return;
+    if (nextStatus === "suspended" && !window.confirm("確定要停用此 Workspace？\n停用後所有成員無法修改此 Workspace 的資料；既有資料會保留，可稍後重新啟用。")) return;
     setPending("status"); setMessage("");
     const response = await fetch(`/api/admin/workspaces/${workspaceId}`, { body: JSON.stringify({ status: nextStatus }), headers: { "content-type": "application/json" }, method: "PATCH" });
     const data = await response.json().catch(() => ({}));
@@ -23,6 +23,7 @@ export function WorkspaceControls({ features, status, workspaceId }: { features:
   }
 
   async function updateFeature(feature: Feature) {
+    if (feature.enabled && !window.confirm(`確定要停用「${feature.featureKey}」功能？\n停用後此 Workspace 的所有成員將無法使用對應功能與 API；資料會保留，之後可重新啟用。`)) return;
     setPending(feature.featureKey); setMessage("");
     const response = await fetch(`/api/admin/workspaces/${workspaceId}/features/${feature.featureKey}`, { body: JSON.stringify({ enabled: !feature.enabled }), headers: { "content-type": "application/json" }, method: "PATCH" });
     const data = await response.json().catch(() => ({}));

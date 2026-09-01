@@ -11,6 +11,7 @@ import { type ChangeEvent, type CSSProperties, FormEvent, useEffect, useMemo, us
 import { defaultReceiptTemplate, receiptTemplatePresets, type ReceiptTemplate } from "@/lib/receipt-template";
 import { QuotationWorkspace } from "@/components/quotation-workspace";
 import { InvoiceWorkspace } from "@/components/invoice-workspace";
+import { FieldHelp, FirstUseGuide } from "@/components/page-guidance";
 
 type ReceiptForm = {
   receiptNumber: string;
@@ -523,6 +524,7 @@ export default function Home() {
   }
 
   async function confirmReceiptPayment(receipt: SavedReceipt) {
+    if (!window.confirm(`確認「${receipt.receiptNumber}」已收款？\n確認後會列入收支記帳的收入；如付款尚未完成，請先保留為待收款。`)) return;
     const response = await fetch(`/api/receipts/${receipt.id}`, { body: JSON.stringify({ paymentStatus: "paid" }), headers: { "content-type": "application/json" }, method: "PUT" });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) { setSaveMessage(data.message ?? "無法確認收款。"); return; }
@@ -614,6 +616,7 @@ export default function Home() {
             <div>
               <p className="eyebrow">CREATE A RECEIPT</p>
               <h2 id="editor-title">{mode === "single" ? "填寫收據資料" : "批量生成收據"}</h2>
+              <p className="field-hint">填寫完成後會先安全儲存至收據中心，再開啟列印視窗供你輸出 PDF。</p>
             </div>
             <button className="reset-button" type="button" onClick={resetReceipt}>
               <RotateCcw size={15} aria-hidden="true" />
@@ -622,6 +625,8 @@ export default function Home() {
           </div>
 
           <SavedReceiptList currency={user.organization.currency} receipts={savedReceipts} />
+
+          {!savedReceipts.length && <FirstUseGuide title="第一次建立收據？" steps={["確認收款方資料是否正確", "填寫付款人、收款項目與金額", "儲存後在列印視窗選擇「另存為 PDF」"]} />}
 
           <div className="mode-switch" role="tablist" aria-label="收據生成方式">
             <button className={mode === "single" ? "active" : ""} type="button" role="tab" aria-selected={mode === "single"} onClick={() => switchMode("single")}>
@@ -655,6 +660,7 @@ export default function Home() {
                       <option value={otherPaymentMethod}>其他（自行填寫）</option>
                       <option value={hiddenPaymentMethod}>不顯示於收據</option>
                     </select>
+                    <FieldHelp>選擇「不顯示於收據」只會隱藏列印內容，不會影響收據的儲存。</FieldHelp>
                   </label>
                   {paymentMethodSelectValue(form.paymentMethod) === otherPaymentMethod && <Field label="其他付款方式" required value={form.paymentMethod} placeholder="例如：轉數快、支票或自訂方式" onChange={(value) => update("paymentMethod", value)} invalid={submitted && !form.paymentMethod.trim()} />}
                   <Field className="full-span" label="付款人地址（選填）" value={form.payerAddress} placeholder="香港⋯" onChange={(value) => update("payerAddress", value)} />
@@ -693,6 +699,7 @@ export default function Home() {
                   <button className="template-button" type="button" onClick={downloadBatchTemplate}><Download size={14} aria-hidden="true" />下載格式範例</button>
                 </div>
                 <p className="batch-intro">支援直接從 Excel 或 Google Sheets 複製貼上，可包含標題列。欄位順序：開立日期、付款人名稱、付款人地址、收款項目、收款金額、付款方式、備註。系統會依每筆日期自動派發收據編號。付款方式可填 Bank transfer、Cash、Cheque、Credit card、FPS、PayMe 或任何自訂文字；填「不顯示」則不會列印在收據上。日期可留空。</p>
+                <p className="field-hint">匯入只會先帶入內容；按下「生成收據」才會建立所有收據，請先檢查筆數與金額。</p>
                 <label className="batch-file-upload">
                   <FileUp size={20} aria-hidden="true" />
                   <span><strong>上傳批量檔案</strong><small>支援 CSV、TSV、TXT、XLSX、XLS；會讀取第一個工作表</small></span>
@@ -914,6 +921,7 @@ function MemberManagement({ actorId, actorRole, allowAdmin, onClose }: { actorId
 
   async function changeMemberStatus(member: { id: string; name: string; status: "active" | "suspended" }) {
     const nextStatus = member.status === "active" ? "suspended" : "active";
+    if (nextStatus === "suspended" && !window.confirm(`確定要停用 ${member.name} 的帳號？\n停用後該成員無法使用此工作區；既有資料與操作紀錄會保留。`)) return;
     setMessage("");
     const response = await fetch(`/api/members/${member.id}`, { body: JSON.stringify({ status: nextStatus }), headers: { "content-type": "application/json" }, method: "PATCH" });
     const data = await response.json().catch(() => ({}));
@@ -923,11 +931,12 @@ function MemberManagement({ actorId, actorRole, allowAdmin, onClose }: { actorId
   }
 
   return <section className="member-management" aria-labelledby="members-title">
-    <div className="member-heading"><div><p className="eyebrow">TEAM ACCESS</p><h3 id="members-title">成員管理</h3></div><button className="reset-button" type="button" onClick={onClose}>關閉</button></div>
+    <div className="member-heading"><div><p className="eyebrow">TEAM ACCESS</p><h3 id="members-title">成員管理</h3><p className="field-hint">新增帳號並設定角色。管理者可處理設定與成員；操作員可處理日常資料；檢視者只能查看。</p></div><button className="reset-button" type="button" onClick={onClose}>關閉</button></div>
+    {!members.length && <FirstUseGuide title="第一次邀請成員？" steps={["填寫同事姓名與公司 Email", "依工作內容選擇最小必要角色", "提供暫用密碼，請對方首次登入後立即變更"]} />}
     <form className="member-form" onSubmit={createNewMember}>
       <label><span>姓名</span><input value={name} onChange={(event) => setName(event.target.value)} required /></label>
       <label><span>Email</span><input type="email" value={email} onChange={(event) => setEmail(event.target.value)} required /></label>
-      <label><span>角色</span><select value={role} onChange={(event) => setRole(event.target.value as "admin" | "operator" | "viewer")}><option value="operator">操作員</option><option value="viewer">檢視者</option>{allowAdmin && <option value="admin">管理者</option>}</select></label>
+      <label><span>角色</span><select value={role} onChange={(event) => setRole(event.target.value as "admin" | "operator" | "viewer")}><option value="operator">操作員</option><option value="viewer">檢視者</option>{allowAdmin && <option value="admin">管理者</option>}</select><small>角色決定可查看與可修改的功能，建立後可再調整。</small></label>
       <label><span>暫用密碼</span><input type="password" minLength={12} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="至少 12 個字元" required /></label>
       <button className="member-create" type="submit"><UserPlus size={15} aria-hidden="true" />新增帳號</button>
     </form>
@@ -969,22 +978,23 @@ function LedgerView({ canCreate, currency, entries, onSave, summary }: { canCrea
   }
 
   return <section className="page-view ledger-view no-print" aria-labelledby="ledger-title">
-    <div className="page-heading"><div><p className="eyebrow">CASH FLOW</p><h2 id="ledger-title">收支記帳</h2><p>已儲存的收據會自動列為收入 IN；這裡只需補記沒有開收據的收入與所有支出。</p></div></div>
+    <div className="page-heading"><div><p className="eyebrow">CASH FLOW</p><h2 id="ledger-title">收支記帳</h2><p>查看現金流與手動補記收支。已確認收款的收據會自動列為收入，這裡只需補記未開收據的收入與所有支出。</p></div></div>
+    {!entries.length && canCreate && <FirstUseGuide title="第一次記帳？" steps={["選擇這筆是收入或支出", "填寫實際發生日期、用途與金額", "儲存後，餘額會立即重新計算"]} />}
     <div className="metric-grid ledger-metric-grid"><article><span>總收入 IN</span><strong className="amount-income">{currency} {formatAmount(String(summary.income))}</strong><small>包含已儲存收據與手動收入</small></article><article><span>總支出 OUT</span><strong className="amount-expense">{currency} {formatAmount(String(summary.expense))}</strong><small>所有手動支出紀錄</small></article><article><span>目前餘額</span><strong>{currency} {formatAmount(String(summary.balance))}</strong><small>收入減支出</small></article></div>
     <div className="ledger-layout">
       <section className="ledger-card ledger-form-card">
         <div className="card-heading"><div><p className="eyebrow">NEW ENTRY</p><h3>新增一筆收支</h3></div></div>
         {canCreate ? <form className="ledger-form" onSubmit={(event) => void submit(event)}>
-          <label className="field"><span>類型 <b>*</b></span><select value={form.type} onChange={(event) => setForm((current) => ({ ...current, type: event.target.value as LedgerEntry["type"] }))}><option value="IN">收入 IN</option><option value="OUT">支出 OUT</option></select></label>
+          <label className="field"><span>類型 <b>*</b></span><select value={form.type} onChange={(event) => setForm((current) => ({ ...current, type: event.target.value as LedgerEntry["type"] }))}><option value="IN">收入 IN</option><option value="OUT">支出 OUT</option></select><FieldHelp>「收入」會增加餘額；「支出」會扣減餘額。收據帶入的收入無需在此重複新增。</FieldHelp></label>
           <label className="field"><span>日期 <b>*</b></span><input type="date" value={form.date} onChange={(event) => setForm((current) => ({ ...current, date: event.target.value }))} /></label>
           <label className="field full-span"><span>說明 <b>*</b></span><input aria-invalid={submitted && !form.description.trim()} maxLength={500} placeholder="例如：客戶服務費、辦公室租金" value={form.description} onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))} /></label>
           <label className="field full-span"><span>金額（{currency}）<b>*</b></span><input aria-invalid={submitted && (!Number.isFinite(Number(form.amount)) || Number(form.amount) <= 0)} inputMode="decimal" min="0.01" placeholder="0.00" step="0.01" type="number" value={form.amount} onChange={(event) => setForm((current) => ({ ...current, amount: event.target.value }))} /></label>
           {submitted && (!form.date || !form.description.trim() || !Number.isFinite(Number(form.amount)) || Number(form.amount) <= 0) && <p className="validation-message">請填妥日期、說明與大於 0 的金額。</p>}
           <button className="primary-action" disabled={isSaving} type="submit">{isSaving ? "儲存中…" : "儲存收支紀錄"}</button>
-          {message && <p className="save-message" role="status">{message}</p>}
+          {message && <p className="save-message" role="status">{message} 儲存後會顯示在右側紀錄中。</p>}
         </form> : <p className="ledger-read-only">你的角色只有檢視權限，可查看所有收支紀錄與餘額。</p>}
       </section>
-      <section className="ledger-card ledger-list-card"><div className="card-heading"><div><p className="eyebrow">RECENT ENTRIES</p><h3>收支紀錄</h3></div><span className="ledger-count">顯示最近 {entries.length} 筆</span></div>{entries.length ? <div className="ledger-table-list"><div className="ledger-table-header"><span>類型</span><span>說明</span><span>日期</span><span>金額</span></div>{entries.map((entry) => <div className="ledger-table-row" key={entry.id}><span className={`ledger-type ${entry.type === "IN" ? "income" : "expense"}`}>{entry.type === "IN" ? <ArrowUpRight size={15} aria-hidden="true" /> : <ArrowDownRight size={15} aria-hidden="true" />}{entry.type}</span><strong>{entry.description}{entry.source === "receipt" && <small className="ledger-source">由收據自動帶入</small>}</strong><span>{entry.date}</span><b className={entry.type === "IN" ? "amount-income" : "amount-expense"}>{entry.type === "IN" ? "+" : "−"}{currency} {formatAmount(String(entry.amount))}</b></div>)}</div> : <div className="empty-ledger"><BookOpenText size={28} aria-hidden="true" /><h3>尚未有收支紀錄</h3><p>{canCreate ? "從第一筆收入或支出開始，系統會自動統計餘額。" : "目前尚未有可查看的收支紀錄。"}</p></div>}</section>
+      <section className="ledger-card ledger-list-card"><div className="card-heading"><div><p className="eyebrow">RECENT ENTRIES</p><h3>收支紀錄</h3></div><span className="ledger-count">顯示最近 {entries.length} 筆</span></div>{entries.length ? <div className="ledger-table-list"><div className="ledger-table-header"><span>類型</span><span>說明</span><span>日期</span><span>金額</span></div>{entries.map((entry) => <div className="ledger-table-row" key={entry.id}><span className={`ledger-type ${entry.type === "IN" ? "income" : "expense"}`}>{entry.type === "IN" ? <ArrowUpRight size={15} aria-hidden="true" /> : <ArrowDownRight size={15} aria-hidden="true" />}{entry.type}</span><strong>{entry.description}{entry.source === "receipt" && <small className="ledger-source">由收據自動帶入</small>}</strong><span>{entry.date}</span><b className={entry.type === "IN" ? "amount-income" : "amount-expense"}>{entry.type === "IN" ? "+" : "−"}{currency} {formatAmount(String(entry.amount))}</b></div>)}</div> : <div className="empty-ledger"><BookOpenText size={28} aria-hidden="true" /><h3>目前還沒有收支紀錄</h3><p>{canCreate ? "從左側新增第一筆收入或支出，儲存後系統會立即統計餘額。" : "目前尚未有可查看的收支紀錄。"}</p></div>}</section>
     </div>
   </section>;
 }
@@ -992,10 +1002,10 @@ function LedgerView({ canCreate, currency, entries, onSave, summary }: { canCrea
 function DashboardView({ receipts, user, onCreate }: { receipts: SavedReceipt[]; user: SessionUser; onCreate: () => void }) {
   const total = receipts.filter((receipt) => receipt.paymentStatus !== "pending").reduce((sum, receipt) => sum + receipt.amount, 0);
   return <section className="page-view dashboard-view no-print" aria-labelledby="dashboard-title">
-    <div className="page-heading"><div><p className="eyebrow">OVERVIEW</p><h2 id="dashboard-title">早安，{user.name}</h2><p>這裡是 {user.organization.name} 的日常營運概況。</p></div></div>
+    <div className="page-heading"><div><p className="eyebrow">OVERVIEW</p><h2 id="dashboard-title">早安，{user.name}</h2><p>這裡集中查看 {user.organization.name} 的收據與收款概況；從「新增收據」開始處理日常收款。</p></div></div>
     <div className="metric-grid"><article><span>最近收據</span><strong>{receipts.length}</strong><small>目前顯示最近 20 筆</small></article><article><span>最近收款總額</span><strong>{user.organization.currency} {formatAmount(String(total))}</strong><small>以已儲存收據計算</small></article><article><span>你的權限</span><strong>{roleLabel(user.organization.role)}</strong><small>{user.organization.role === "viewer" ? "可查看收據與報表" : "可處理日常收據作業"}</small></article></div>
     <div className="dashboard-grid"><section className="dashboard-card"><div className="card-heading"><div><p className="eyebrow">RECENT ACTIVITY</p><h3>最近儲存的收據</h3></div>{user.organization.role !== "viewer" && <button className="text-button" type="button" onClick={onCreate}>新增收據</button>}</div>{receipts.length ? <ul className="receipt-summary-list">{receipts.slice(0, 5).map((receipt) => <li key={receipt.id}><div><strong>{receipt.receiptNumber}</strong><span>{receipt.payerName} · {receipt.issueDate}</span></div><b>{user.organization.currency} {formatAmount(String(receipt.amount))}</b></li>)}</ul> : <EmptyReceipts onCreate={onCreate} canCreate={user.organization.role !== "viewer"} />}</section>
-    <aside className="dashboard-card next-steps"><p className="eyebrow">GET STARTED</p><h3>下一步可以做什麼？</h3><ol><li>確認公司收款方資料</li><li>建立第一張收據</li><li>需要協作時新增成員</li></ol></aside></div>
+    <aside className="dashboard-card next-steps"><p className="eyebrow">GET STARTED</p><h3>{receipts.length ? "下一步可以做什麼？" : "從第一筆資料開始"}</h3><ol><li>確認公司收款方資料</li><li>建立第一張收據</li><li>需要協作時新增成員</li></ol></aside></div>
   </section>;
 }
 
@@ -1010,7 +1020,7 @@ function ReceiptLineItemsDetail({ currency, lineItems, onPrint }: { currency: st
 }
 
 function EmptyReceipts({ canCreate, onCreate }: { canCreate: boolean; onCreate: () => void }) {
-  return <div className="empty-receipts"><ReceiptText size={28} aria-hidden="true" /><h3>尚未建立收據</h3><p>{canCreate ? "從一張收據開始，之後可在這裡快速找到所有紀錄。" : "目前尚未有可查看的收據紀錄。"}</p>{canCreate && <button className="text-button" type="button" onClick={onCreate}>建立第一張收據</button>}</div>;
+  return <div className="empty-receipts"><ReceiptText size={28} aria-hidden="true" /><h3>目前還沒有建立任何收據</h3><p>{canCreate ? "建立第一張收據，填入付款人、收款項目與金額；儲存後即可輸出 PDF 並在這裡追蹤收款狀態。" : "目前尚未有可查看的收據紀錄。"}</p>{canCreate && <button className="text-button" type="button" onClick={onCreate}>＋ 建立第一張收據</button>}</div>;
 }
 
 function IssuerFields({ companyName, form, update, required }: { companyName: string; form: ReceiptForm; update: (field: keyof ReceiptForm, value: string) => void; required: boolean }) {

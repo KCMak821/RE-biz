@@ -226,6 +226,10 @@ button { cursor: pointer; }
 .field input:focus, .field select:focus { border-color: var(--forest); box-shadow: 0 0 0 3px rgba(30, 76, 69, .11); }
 .field input[aria-invalid="true"] { border-color: var(--error); }
 .field-hint { margin: -7px 0 0; color: #728078; font-size: 11px; line-height: 1.45; }
+.first-use-guide { max-width: 760px; margin: 0 0 22px; border: 1px solid #cbd8c7; border-left: 4px solid var(--forest); background: #f5f8f1; padding: 16px 18px; }
+.first-use-guide .eyebrow { margin: 0 0 5px; }
+.first-use-guide h3 { margin: 0; color: var(--ink); font-family: Georgia, "Noto Serif TC", serif; font-size: 18px; }
+.first-use-guide ol { display: grid; gap: 5px; margin: 10px 0 0; padding-left: 20px; color: #536159; font-size: 12px; line-height: 1.55; }
 .read-only-value { display: flex; align-items: center; background: #eceee8; color: #52605a; font-size: 12px; line-height: 1.35; }
 .validation-message { margin: -7px 0 14px; color: var(--error); font-size: 13px; }
 .primary-action {
@@ -561,6 +565,7 @@ footer { padding-top: 16px; padding-bottom: 19px; color: #657169; font-size: 11p
   .page-view { padding: 30px 20px 44px; }
   .page-heading { display: grid; gap: 17px; margin-bottom: 24px; }
   .page-heading h2 { font-size: 28px; }
+  .first-use-guide { padding: 14px; }
   .metric-grid article { min-height: 0; }
   .receipt-table-card, .ledger-list-card { overflow-x: auto; }
   .field-grid, .compact-grid { grid-template-columns: 1fr; }
