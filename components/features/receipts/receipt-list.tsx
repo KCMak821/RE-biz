@@ -1,21 +1,21 @@
 "use client";
 
-import { CircleCheck, Eye, FileDown, Plus, ReceiptText } from "lucide-react";
-import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { CircleCheck, FileDown, Plus, ReceiptText } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
 
 import { Button, ButtonLink } from "@/components/app/button";
 import { useConfirm } from "@/components/app/confirm";
 import { DataTable, ListCard, type Column } from "@/components/app/data-table";
-import { Modal } from "@/components/app/dialog";
 import { EmptyState, FeatureDisabled, NoResults, ReadOnlyNotice } from "@/components/app/empty-state";
 import { SkeletonRows } from "@/components/app/feedback";
 import { ListToolbar, ToolbarSelect } from "@/components/app/list-toolbar";
 import { PageHeader } from "@/components/app/page-header";
-import { MenuItem, RowActions } from "@/components/app/row-actions";
+import { Pagination } from "@/components/app/pagination";
+import { MenuLink, RowActions } from "@/components/app/row-actions";
 import { useWorkspace } from "@/components/app/session";
 import { StatusBadge } from "@/components/app/status-badge";
 import { notify } from "@/components/app/toast";
+import { useListQuery } from "@/components/app/use-list-query";
 import { ReceiptPaper } from "@/components/features/receipts/receipt-paper";
 import { ApiError, request } from "@/lib/api";
 import { currencyAmount, formatDate } from "@/lib/format";
@@ -24,32 +24,40 @@ import { organizationLogoUrl, organizationSealUrl } from "@/lib/organization-ass
 import { draftFromSavedReceipt } from "@/lib/receipt-form";
 import type { SavedReceipt } from "@/types/records";
 
-const RECEIPT_PAGE_SIZE = 20;
+const filterDefaults = { status: "all" };
+
+const statusOptions = [
+  { label: "全部", value: "all" },
+  { label: "待收款", value: "pending" },
+  { label: "已收款", value: "paid" },
+];
 
 export function ReceiptList() {
   const { canManageRecords, currency, organization } = useWorkspace();
-  const router = useRouter();
-  const searchParams = useSearchParams();
   const confirm = useConfirm();
+  const query = useListQuery({ basePath: "/receipts", filterDefaults });
 
   const [receipts, setReceipts] = useState<SavedReceipt[]>([]);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(true);
   const [blocked, setBlocked] = useState<string | null>(null);
-  const [keyword, setKeyword] = useState("");
-  const [statusFilter, setStatusFilter] = useState(searchParams.get("status") ?? "all");
-  const [preview, setPreview] = useState<SavedReceipt | null>(null);
-  const [printing, setPrinting] = useState<SavedReceipt | null>(null);
   const [confirming, setConfirming] = useState<string | null>(null);
+  const [printing, setPrinting] = useState<SavedReceipt | null>(null);
+  const [version, setVersion] = useState(0);
 
   const logoUrl = organizationLogoUrl(organization);
   const sealUrl = organizationSealUrl(organization);
+  const { apiQuery, page } = query;
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
       setLoading(true);
-      void request<{ receipts?: SavedReceipt[] }>("/api/receipts")
+      void request<{ receipts?: SavedReceipt[]; total?: number; totalPages?: number }>(`/api/receipts?${apiQuery}`)
         .then((data) => {
           setReceipts(data.receipts ?? []);
+          setTotal(data.total ?? 0);
+          setTotalPages(data.totalPages ?? 1);
           setBlocked(null);
         })
         .catch((error: unknown) => {
@@ -59,29 +67,9 @@ export function ReceiptList() {
         .finally(() => setLoading(false));
     }, 0);
     return () => window.clearTimeout(timer);
-  }, []);
+  }, [apiQuery, version]);
 
-  function changeStatus(next: string) {
-    setStatusFilter(next);
-    const params = new URLSearchParams(searchParams.toString());
-    if (next === "all") params.delete("status");
-    else params.set("status", next);
-    router.replace(params.size ? `/receipts?${params}` : "/receipts", { scroll: false });
-  }
-
-  const filtered = useMemo(() => {
-    const search = keyword.trim().toLowerCase();
-    return receipts.filter((receipt) => {
-      const paid = receipt.paymentStatus !== "pending";
-      if (statusFilter === "pending" && paid) return false;
-      if (statusFilter === "paid" && !paid) return false;
-      if (!search) return true;
-      return [receipt.receiptNumber, receipt.payerName, receipt.description]
-        .join(" ")
-        .toLowerCase()
-        .includes(search);
-    });
-  }, [keyword, receipts, statusFilter]);
+  const reload = useCallback(() => setVersion((current) => current + 1), []);
 
   async function confirmPayment(receipt: SavedReceipt) {
     const proceed = await confirm({
@@ -97,10 +85,8 @@ export function ReceiptList() {
         body: JSON.stringify({ paymentStatus: "paid" }),
         method: "PUT",
       });
-      setReceipts((current) =>
-        current.map((item) => (item.id === receipt.id ? { ...item, paymentStatus: "paid" } : item)),
-      );
       notify.success(`${receipt.receiptNumber} 已確認收款`, "這筆款項已列入收支記帳的收入。");
+      reload();
     } catch (error) {
       notify.error("無法確認收款", error instanceof Error ? error.message : undefined);
     } finally {
@@ -181,37 +167,22 @@ export function ReceiptList() {
             filters={
               <ToolbarSelect
                 label="收款狀態"
-                onChange={changeStatus}
-                options={[
-                  { label: "全部", value: "all" },
-                  { label: "待收款", value: "pending" },
-                  { label: "已收款", value: "paid" },
-                ]}
-                value={statusFilter}
+                onChange={(value) => query.setFilter("status", value)}
+                options={statusOptions}
+                value={query.filters.status}
               />
             }
-            onReset={
-              keyword || statusFilter !== "all"
-                ? () => {
-                    setKeyword("");
-                    changeStatus("all");
-                  }
-                : undefined
-            }
-            onSearchChange={setKeyword}
-            resultLabel={
-              loading
-                ? "載入中…"
-                : `顯示 ${filtered.length} 筆，系統保留最近 ${RECEIPT_PAGE_SIZE} 張收據`
-            }
+            onReset={query.isFiltered ? query.clear : undefined}
+            onSearchChange={query.setDraftKeyword}
+            resultLabel={loading ? "載入中…" : `共 ${total} 張收據`}
             searchPlaceholder="搜尋收據編號、付款人或項目"
-            searchValue={keyword}
+            searchValue={query.draftKeyword}
           />
 
           <ListCard>
             {loading ? (
               <SkeletonRows label="正在載入收據" rows={6} />
-            ) : filtered.length ? (
+            ) : receipts.length ? (
               <DataTable
                 ariaLabel="收據列表"
                 columns={columns}
@@ -219,20 +190,12 @@ export function ReceiptList() {
                   <RowActions
                     menu={
                       <>
-                        <MenuItem
-                          icon={<Eye aria-hidden="true" size={15} />}
-                          onClick={() => setPreview(receipt)}
-                        >
-                          檢視收據內容
-                        </MenuItem>
+                        <MenuLink href={`/receipts/${receipt.id}`}>檢視收據</MenuLink>
                         {canManageRecords && receipt.paymentStatus === "pending" ? (
-                          <MenuItem
+                          <MenuItemConfirmPayment
                             disabled={confirming === receipt.id}
-                            icon={<CircleCheck aria-hidden="true" size={15} />}
-                            onClick={() => void confirmPayment(receipt)}
-                          >
-                            確認已收款
-                          </MenuItem>
+                            onConfirm={() => void confirmPayment(receipt)}
+                          />
                         ) : null}
                       </>
                     }
@@ -247,16 +210,12 @@ export function ReceiptList() {
                     </Button>
                   </RowActions>
                 )}
+                rowHref={(receipt) => `/receipts/${receipt.id}`}
                 rowKey={(receipt) => receipt.id}
-                rows={filtered}
+                rows={receipts}
               />
-            ) : receipts.length ? (
-              <NoResults
-                onReset={() => {
-                  setKeyword("");
-                  changeStatus("all");
-                }}
-              />
+            ) : query.isFiltered ? (
+              <NoResults onReset={query.clear} />
             ) : (
               <EmptyState
                 actions={
@@ -274,46 +233,10 @@ export function ReceiptList() {
               </EmptyState>
             )}
           </ListCard>
+
+          <Pagination disabled={loading} onPageChange={query.setPage} page={page} totalPages={totalPages} />
         </>
       )}
-
-      <Modal
-        description={preview ? `${preview.payerName} · ${formatDate(preview.issueDate)}` : undefined}
-        footer={
-          preview ? (
-            <>
-              <Button onClick={() => setPreview(null)} variant="ghost">
-                關閉
-              </Button>
-              <Button
-                icon={<FileDown aria-hidden="true" size={15} />}
-                onClick={() => {
-                  const target = preview;
-                  setPreview(null);
-                  window.setTimeout(() => print(target), 80);
-                }}
-                variant="primary"
-              >
-                下載 PDF
-              </Button>
-            </>
-          ) : null
-        }
-        onClose={() => setPreview(null)}
-        open={Boolean(preview)}
-        title={preview?.receiptNumber ?? "收據內容"}
-        wide
-      >
-        {preview ? (
-          <ReceiptPaper
-            currency={currency}
-            logoUrl={logoUrl}
-            receipt={draftFromSavedReceipt(preview)}
-            sealUrl={sealUrl}
-            template={organization.receiptTemplate}
-          />
-        ) : null}
-      </Modal>
 
       <div className="print-only">
         {printing ? (
@@ -322,10 +245,20 @@ export function ReceiptList() {
             logoUrl={logoUrl}
             receipt={draftFromSavedReceipt(printing)}
             sealUrl={sealUrl}
-            template={organization.receiptTemplate}
+            template={printing.receiptTemplateSnapshot ?? organization.receiptTemplate}
           />
         ) : null}
       </div>
     </div>
+  );
+}
+
+/** Split out so the row menu stays readable. */
+function MenuItemConfirmPayment({ disabled, onConfirm }: { disabled: boolean; onConfirm: () => void }) {
+  return (
+    <button className="row-menu-item" disabled={disabled} onClick={onConfirm} role="menuitem" type="button">
+      <CircleCheck aria-hidden="true" size={15} />
+      確認已收款
+    </button>
   );
 }

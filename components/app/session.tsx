@@ -10,6 +10,11 @@ type Workspace = {
   canManageRecords: boolean;
   canManageSettings: boolean;
   currency: string;
+  /**
+   * Which features a platform admin currently allows. Used to hide what is
+   * switched off; the API still enforces it, so this is UX only.
+   */
+  features: AppUser["features"];
   isOwner: boolean;
   isSuperAdmin: boolean;
   organization: AppUser["organization"];
@@ -34,6 +39,7 @@ export function WorkspaceProvider({ children, user }: { children: ReactNode; use
       canManageRecords: role !== "viewer",
       canManageSettings: role === "owner" || role === "admin",
       currency: user.organization.currency,
+      features: user.features,
       isOwner: role === "owner",
       isSuperAdmin: user.platformRole === "SUPER_ADMIN",
       organization: user.organization,

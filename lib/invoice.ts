@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { calculateLineSubtotal, sumAmounts } from "@/lib/money";
+import { amountToCents, calculateLineSubtotal, sumAmounts } from "@/lib/money";
 import { quoteLineSchema, type CustomerFields, type QuoteLineInput } from "@/lib/quotation";
 
 export const invoiceStatuses = ["draft", "sent", "void"] as const;
@@ -8,6 +8,26 @@ export type InvoiceStatus = (typeof invoiceStatuses)[number];
 export const invoicePaymentStatuses = ["unpaid", "partially_paid", "paid"] as const;
 export type InvoicePaymentStatus = (typeof invoicePaymentStatuses)[number];
 export type InvoiceEffectiveStatus = "draft" | "unpaid" | "overdue" | "partially_paid" | "paid" | "void";
+
+/**
+ * A single receipt of money against an invoice. Payments are recorded rather
+ * than the status being set directly, so "how much is still outstanding" and
+ * "when did each instalment arrive" are answerable from the data.
+ */
+export const invoicePaymentSchema = z.object({
+  amount: z.coerce.number().finite().positive().max(999_999_999),
+  note: z.string().trim().max(500).optional().default(""),
+  paidAt: z.string().date(),
+}).strict();
+export type InvoicePaymentInput = z.infer<typeof invoicePaymentSchema>;
+
+/** Derives the payment status from the recorded payments, never the other way round. */
+export function invoicePaymentStatusFor(paidAmount: number, totalAmount: number): InvoicePaymentStatus {
+  const paidCents = amountToCents(paidAmount);
+  const totalCents = amountToCents(totalAmount);
+  if (paidCents <= 0) return "unpaid";
+  return paidCents >= totalCents ? "paid" : "partially_paid";
+}
 
 export const invoicePayloadSchema = z.object({
   customerId: z.string().regex(/^[a-f\d]{24}$/i),

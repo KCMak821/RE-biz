@@ -1,13 +1,12 @@
 "use client";
 
 import { Save } from "lucide-react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 
 import { Button } from "@/components/app/button";
-import { useConfirm } from "@/components/app/confirm";
-import { useUnsavedChanges } from "@/components/app/dirty-guard";
+import { GuardedLink } from "@/components/app/guarded-link";
+import { useGuardedNavigation, useUnsavedChanges } from "@/components/app/dirty-guard";
 import { Callout, LoadError, SkeletonRows } from "@/components/app/feedback";
 import { EmptyState, FeatureDisabled } from "@/components/app/empty-state";
 import {
@@ -45,7 +44,7 @@ const DEFAULT_TERM_DAYS = 30;
 export function InvoiceEditor({ invoiceId }: { invoiceId?: string }) {
   const { canManageRecords, currency } = useWorkspace();
   const router = useRouter();
-  const confirm = useConfirm();
+  const { confirmDiscard } = useGuardedNavigation();
 
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [items, setItems] = useState<Item[]>([]);
@@ -111,15 +110,8 @@ export function InvoiceEditor({ invoiceId }: { invoiceId?: string }) {
   }
 
   async function cancel() {
-    if (dirty) {
-      const leave = await confirm({
-        confirmLabel: "放棄變更並離開",
-        consequence: "這一頁還沒儲存的內容不會保留。已經儲存過的請款單不受影響。",
-        danger: true,
-        title: "要放棄未儲存的變更嗎？",
-      });
-      if (!leave) return;
-    }
+    // Same wording and same guard as every other way out of this page.
+    if (!(await confirmDiscard())) return;
     setDirty(false);
     router.push(existing ? `/invoices/${existing.id}` : "/invoices");
   }
@@ -242,9 +234,9 @@ export function InvoiceEditor({ invoiceId }: { invoiceId?: string }) {
         <div className="card">
           <EmptyState
             actions={
-              <Link className="btn btn-primary" href="/customers">
+              <GuardedLink className="btn btn-primary" href="/customers">
                 前往新增客戶
-              </Link>
+              </GuardedLink>
             }
             title="還沒有可以請款的客戶"
           >

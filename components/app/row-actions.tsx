@@ -1,8 +1,9 @@
 "use client";
 
 import { Ellipsis } from "lucide-react";
-import Link from "next/link";
 import { useEffect, useRef, useState, type ReactNode } from "react";
+
+import { GuardedLink } from "@/components/app/guarded-link";
 
 /**
  * Row-level actions: the one or two things people do most stay visible as words,
@@ -83,9 +84,9 @@ export function MenuItem({
 
 export function MenuLink({ children, href, icon }: { children: ReactNode; href: string; icon?: ReactNode }) {
   return (
-    <Link className="row-menu-item" href={href} role="menuitem">
+    <GuardedLink className="row-menu-item" href={href} role="menuitem">
       {icon}
       {children}
-    </Link>
+    </GuardedLink>
   );
 }

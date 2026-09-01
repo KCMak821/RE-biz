@@ -6,7 +6,7 @@ import type { CSSProperties } from "react";
 
 import { money } from "@/lib/format";
 import { paymentMethodIsHidden } from "@/lib/receipt-form";
-import type { ReceiptTemplate } from "@/lib/receipt-template";
+import { type ReceiptTemplate } from "@/lib/receipt-template";
 import type { ReceiptDraft } from "@/types/records";
 
 /**
@@ -19,17 +19,21 @@ export function ReceiptPaper({
   receipt,
   sealUrl,
   template,
+  variant = "standard",
 }: {
   currency: string;
   logoUrl?: string;
   receipt: ReceiptDraft;
   sealUrl?: string;
   template: ReceiptTemplate;
+  /** The compact treatment is only used inside the two-up batch print sheet. */
+  variant?: "compact" | "standard";
 }) {
   const formattedAmount = money(receipt.amount);
   const lineItems = receipt.lineItems?.length ? receipt.lineItems : undefined;
   const showPaymentMethod = template.showPaymentMethod && !paymentMethodIsHidden(receipt.paymentMethod);
   const usesUploadedSeal = template.sealSource === "uploaded";
+  const uploadedSealStyle = usesUploadedSeal ? uploadedSealLayoutStyle(template, variant) : {};
   const showSeal =
     template.showSeal &&
     (usesUploadedSeal ? Boolean(sealUrl) : Boolean(template.sealChineseName || template.sealEnglishName));
@@ -38,8 +42,8 @@ export function ReceiptPaper({
   return (
     <article
       aria-label="收據內容"
-      className={`receipt-paper template-${template.preset} logo-${template.logoPosition}`}
-      style={{ "--receipt-accent": template.accentColor } as CSSProperties}
+      className={`receipt-paper${variant === "compact" ? " receipt-paper--compact" : ""} template-${template.preset} logo-${template.logoPosition}`}
+      style={{ "--receipt-accent": template.accentColor, ...uploadedSealStyle } as CSSProperties}
     >
       <div className="receipt-topline" />
       <div className="receipt-header">
@@ -154,7 +158,9 @@ export function ReceiptPaper({
             <div className="signature-block">
               {showSeal ? (
                 usesUploadedSeal ? (
-                  <img alt="公司印章" className="company-seal company-seal-uploaded" src={sealUrl} />
+                  <div className="uploaded-seal-frame">
+                    <img alt="公司印章" className="company-seal company-seal-uploaded" src={sealUrl} />
+                  </div>
                 ) : (
                   <CompanySeal chineseName={template.sealChineseName} englishName={template.sealEnglishName} />
                 )
@@ -176,6 +182,21 @@ export function ReceiptPaper({
       ) : null}
     </article>
   );
+}
+
+function uploadedSealLayoutStyle(template: ReceiptTemplate, variant: "compact" | "standard") {
+  const baseSize = variant === "compact" ? 54 : 94;
+  const ratio = baseSize / 94;
+  const size = (baseSize * template.uploadedSealScale) / 100;
+  const offsetY = template.uploadedSealOffsetY * ratio;
+  const gap = variant === "compact" ? 4 : 8;
+  return {
+    "--uploaded-seal-frame-height": `${size + gap + Math.abs(offsetY)}px`,
+    "--uploaded-seal-frame-margin-top": `${Math.min(offsetY, 0)}px`,
+    "--uploaded-seal-frame-padding-top": `${Math.max(offsetY, 0)}px`,
+    "--uploaded-seal-offset-x": `${template.uploadedSealOffsetX * ratio}px`,
+    "--uploaded-seal-size": `${size}px`,
+  };
 }
 
 function CompanySeal({ chineseName, englishName }: { chineseName: string; englishName: string }) {

@@ -6,6 +6,7 @@ import {
   quoteEffectiveStatus, quotePayloadSchema,
 } from "@/lib/quotation";
 
+import { keywordRegex, readKeyword, readPageParams, resolvePage } from "@/lib/query";
 import { companySnapshot, nextQuoteNumber, quotesCollection, resolveQuotePayload, type QuoteDocument } from "@/lib/quote-store";
 
 export const runtime = "nodejs";
@@ -35,15 +36,14 @@ function serialize(document: QuoteDocument & { _id: ObjectId }) {
   };
 }
 
-function escapedRegex(value: string) { return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
-
 export async function GET(request: Request) {
   try {
     const user = await getCurrentUser();
     if (!user) return Response.json({ message: "請先登入。" }, { status: 401 });
     if (!await canUseWorkspaceFeature(user, "quotations")) return Response.json({ message: "此工作區目前無法使用報價單功能。" }, { status: 403 });
     const { searchParams } = new URL(request.url);
-    const keyword = searchParams.get("q")?.trim().slice(0, 100) ?? "";
+    const keyword = readKeyword(searchParams);
+    const { page: requestedPage, pageSize } = readPageParams(searchParams);
     const requestedStatus = searchParams.get("status");
     const today = new Date().toISOString().slice(0, 10);
     const baseFilter = { organizationId: new ObjectId(user.organization.id), createdBy: new ObjectId(user.id) };
@@ -54,15 +54,25 @@ export async function GET(request: Request) {
       filter.validUntil = { $gte: today };
     }
     if (keyword) {
-      const expression = new RegExp(escapedRegex(keyword), "i");
+      const expression = keywordRegex(keyword);
       filter.$or = [{ quoteNumber: expression }, { "customerSnapshot.name": expression }, { "customerSnapshot.contact": expression }];
     }
     const collection = await quotesCollection();
-    const [quotes, total] = await Promise.all([
-      collection.find(filter).sort({ issueDate: -1, createdAt: -1 }).limit(200).toArray(),
+    // `total` counts the rows the current search and filter match, so the
+    // pager reflects what is actually reachable. `totalAll` keeps the
+    // "no quotes at all yet" empty state distinguishable from "no matches".
+    const [matching, totalAll] = await Promise.all([
+      collection.countDocuments(filter),
       collection.countDocuments(baseFilter),
     ]);
-    return Response.json({ quotes: quotes.map(serialize), total });
+    const { page, skip, totalPages } = resolvePage({ page: requestedPage, pageSize, total: matching });
+    const quotes = await collection
+      .find(filter)
+      .sort({ issueDate: -1, createdAt: -1, _id: -1 })
+      .skip(skip)
+      .limit(pageSize)
+      .toArray();
+    return Response.json({ page, pageSize, quotes: quotes.map(serialize), total: matching, totalAll, totalPages });
   } catch {
     return Response.json({ message: "無法讀取報價單。" }, { status: 503 });
   }

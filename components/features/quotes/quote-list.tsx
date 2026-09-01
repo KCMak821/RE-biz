@@ -1,8 +1,7 @@
 "use client";
 
 import { FileSignature, Plus } from "lucide-react";
-import { useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { ButtonLink } from "@/components/app/button";
 import { DataTable, ListCard, type Column } from "@/components/app/data-table";
@@ -10,9 +9,11 @@ import { EmptyState, FeatureDisabled, NoResults, ReadOnlyNotice } from "@/compon
 import { SkeletonRows } from "@/components/app/feedback";
 import { ListToolbar, ToolbarSelect } from "@/components/app/list-toolbar";
 import { PageHeader } from "@/components/app/page-header";
+import { Pagination } from "@/components/app/pagination";
 import { useWorkspace } from "@/components/app/session";
 import { StatusBadge } from "@/components/app/status-badge";
 import { notify } from "@/components/app/toast";
+import { useListQuery } from "@/components/app/use-list-query";
 import { ApiError, request } from "@/lib/api";
 import { currencyAmount, formatDate } from "@/lib/format";
 import { help } from "@/lib/help-content";
@@ -27,47 +28,41 @@ const statusOptions = [
   { label: "已失效", value: "expired" },
 ];
 
+const filterDefaults = { status: "all" };
+
 export function QuoteList() {
   const { canManageRecords, currency } = useWorkspace();
-  const router = useRouter();
-  const searchParams = useSearchParams();
+  const query = useListQuery({ basePath: "/quotes", filterDefaults });
 
   const [quotes, setQuotes] = useState<Quote[]>([]);
-  const [total, setTotal] = useState<number | null>(null);
+  const [total, setTotal] = useState(0);
+  const [totalAll, setTotalAll] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(true);
   const [blocked, setBlocked] = useState<string | null>(null);
-  const [keyword, setKeyword] = useState("");
-  const [statusFilter, setStatusFilter] = useState(searchParams.get("status") ?? "all");
-
-  const load = useCallback((status: string, search: string) => {
-    const params = new URLSearchParams();
-    if (search.trim()) params.set("q", search.trim());
-    if (status !== "all") params.set("status", status);
-    setLoading(true);
-    void request<{ quotes?: Quote[]; total?: number }>(`/api/quotes?${params}`)
-      .then((data) => {
-        setQuotes(data.quotes ?? []);
-        setTotal(data.total ?? 0);
-        setBlocked(null);
-      })
-      .catch((error: unknown) => {
-        if (error instanceof ApiError && error.isForbidden) setBlocked(error.message);
-        else notify.error("無法讀取報價單", error instanceof Error ? error.message : undefined);
-      })
-      .finally(() => setLoading(false));
-  }, []);
+  const { apiQuery, page } = query;
 
   useEffect(() => {
-    const timer = window.setTimeout(() => load(statusFilter, keyword), keyword ? 250 : 0);
+    const timer = window.setTimeout(() => {
+      setLoading(true);
+      void request<{ quotes?: Quote[]; total?: number; totalAll?: number; totalPages?: number }>(
+        `/api/quotes?${apiQuery}`,
+      )
+        .then((data) => {
+          setQuotes(data.quotes ?? []);
+          setTotal(data.total ?? 0);
+          setTotalAll(data.totalAll ?? 0);
+          setTotalPages(data.totalPages ?? 1);
+          setBlocked(null);
+        })
+        .catch((error: unknown) => {
+          if (error instanceof ApiError && error.isForbidden) setBlocked(error.message);
+          else notify.error("無法讀取報價單", error instanceof Error ? error.message : undefined);
+        })
+        .finally(() => setLoading(false));
+    }, 0);
     return () => window.clearTimeout(timer);
-  }, [keyword, load, statusFilter]);
-
-  function changeStatus(next: string) {
-    setStatusFilter(next);
-    const params = new URLSearchParams();
-    if (next !== "all") params.set("status", next);
-    router.replace(params.size ? `/quotes?${params}` : "/quotes", { scroll: false });
-  }
+  }, [apiQuery]);
 
   const columns: Column<Quote>[] = [
     {
@@ -134,26 +129,18 @@ export function QuoteList() {
 
           <ListToolbar
             filters={
-              <ToolbarSelect label="狀態" onChange={changeStatus} options={statusOptions} value={statusFilter} />
+              <ToolbarSelect
+                label="狀態"
+                onChange={(value) => query.setFilter("status", value)}
+                options={statusOptions}
+                value={query.filters.status}
+              />
             }
-            onReset={
-              keyword || statusFilter !== "all"
-                ? () => {
-                    setKeyword("");
-                    changeStatus("all");
-                  }
-                : undefined
-            }
-            onSearchChange={setKeyword}
-            resultLabel={
-              loading
-                ? "載入中…"
-                : total === null
-                  ? undefined
-                  : `顯示 ${quotes.length} 張，共 ${total} 張報價單`
-            }
+            onReset={query.isFiltered ? query.clear : undefined}
+            onSearchChange={query.setDraftKeyword}
+            resultLabel={loading ? "載入中…" : `共 ${total} 張報價單`}
             searchPlaceholder="搜尋報價單號、客戶或聯絡人"
-            searchValue={keyword}
+            searchValue={query.draftKeyword}
           />
 
           <ListCard>
@@ -172,13 +159,8 @@ export function QuoteList() {
                 rowKey={(quote) => quote.id}
                 rows={quotes}
               />
-            ) : total ? (
-              <NoResults
-                onReset={() => {
-                  setKeyword("");
-                  changeStatus("all");
-                }}
-              />
+            ) : totalAll ? (
+              <NoResults onReset={query.clear} />
             ) : (
               <EmptyState
                 actions={
@@ -196,6 +178,8 @@ export function QuoteList() {
               </EmptyState>
             )}
           </ListCard>
+
+          <Pagination disabled={loading} onPageChange={query.setPage} page={page} totalPages={totalPages} />
         </>
       )}
     </div>

@@ -6,6 +6,7 @@ import { cookies } from "next/headers";
 
 import { getDatabase } from "@/lib/mongodb";
 import { defaultReceiptTemplate, type ReceiptTemplate } from "@/lib/receipt-template";
+import { defaultWorkspaceFeatures, readWorkspaceFeatures, type WorkspaceFeatures } from "@/lib/workspace-features";
 
 const SESSION_COOKIE = "receipt_session";
 const SESSION_DURATION_MS = 1000 * 60 * 60 * 24 * 30;
@@ -21,6 +22,12 @@ export type WorkspaceStatus = typeof workspaceStatuses[number];
 
 export type AppUser = {
   email: string;
+  /**
+   * Which workspace features a platform admin currently allows. Carried on the
+   * session so navigation can hide what is switched off instead of letting the
+   * user discover it from a 403.
+   */
+  features: WorkspaceFeatures;
   id: string;
   mustChangePassword: boolean;
   name: string;
@@ -147,8 +154,13 @@ async function toAppUser(user: UserDocument & { _id: ObjectId }): Promise<AppUse
   if (membership.status !== "active") return null;
   const organization = await (await getDatabase()).collection<OrganizationDocument>("organizations").findOne({ _id: membership.organizationId });
   if (!organization) return null;
+  // A suspended workspace can use nothing, so the session reports every feature
+  // as unavailable rather than relying on each page to re-check the status.
+  const features = organization.status === "suspended"
+    ? { accounting: false, invoices: false, quotations: false, receipts: false }
+    : await readWorkspaceFeatures(membership.organizationId).catch(() => defaultWorkspaceFeatures());
   return {
-    email: user.email, id: user._id.toHexString(), mustChangePassword: user.mustChangePassword === true, name: user.name,
+    email: user.email, features, id: user._id.toHexString(), mustChangePassword: user.mustChangePassword === true, name: user.name,
     platformRole: user.platformRole ?? "USER",
     organization: {
       address: organization.address ?? "", bankDetails: organization.bankDetails ?? "", businessRegistration: organization.businessRegistration ?? "", contact: organization.contact ?? "", currency: organization.currency ?? "HKD", email: organization.email ?? "",
@@ -267,7 +279,14 @@ export async function updateOrganizationSeal(user: AppUser, seal: OrganizationSe
 }
 
 export async function updateOrganizationReceiptTemplate(user: AppUser, receiptTemplate: ReceiptTemplate) {
-  await (await getDatabase()).collection<OrganizationDocument>("organizations").updateOne(
+  const database = await getDatabase();
+  // Receipts created before layout snapshots existed must be frozen before the
+  // organization default changes, otherwise this save would restyle history.
+  await database.collection("receipts").updateMany(
+    { organizationId: new ObjectId(user.organization.id), receiptTemplateSnapshot: { $exists: false } },
+    { $set: { receiptTemplateSnapshot: { ...user.organization.receiptTemplate } } },
+  );
+  await database.collection<OrganizationDocument>("organizations").updateOne(
     { _id: new ObjectId(user.organization.id) },
     { $set: { receiptTemplate } },
   );

@@ -4,6 +4,7 @@ import { canManageRecords, getCurrentUser } from "@/lib/auth";
 import { canUseWorkspaceFeature } from "@/lib/platform-admin";
 import { ledgerEntrySchema, type LedgerEntryInput } from "@/lib/ledger";
 import { getDatabase } from "@/lib/mongodb";
+import { keywordRegex, readKeyword, readPageParams, resolvePage } from "@/lib/query";
 
 export const runtime = "nodejs";
 
@@ -13,16 +14,17 @@ type LedgerEntryDocument = LedgerEntryInput & {
   organizationId: ObjectId;
 };
 
-type ReceiptIncomeDocument = {
+type LedgerRow = {
   _id: ObjectId;
   amount: number;
   createdAt: Date;
-  issueDate: string;
-  organizationId: ObjectId;
-  paymentStatus?: "pending" | "paid";
-  payerName: string;
-  receiptNumber: string;
+  date: string;
+  description: string;
+  source: "manual" | "receipt";
+  type: "IN" | "OUT";
 };
+
+const ledgerTypes = ["all", "IN", "OUT"] as const;
 
 async function ledgerCollection() {
   const collection = (await getDatabase()).collection<LedgerEntryDocument>("ledgerEntries");
@@ -30,60 +32,120 @@ async function ledgerCollection() {
   return collection;
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const user = await getCurrentUser();
     if (!user) return Response.json({ message: "請先登入。" }, { status: 401 });
     if (!await canUseWorkspaceFeature(user, "accounting")) return Response.json({ message: "此工作區目前無法使用記帳功能。" }, { status: 403 });
 
+    const { searchParams } = new URL(request.url);
+    const type = searchParams.get("type") ?? "all";
+    if (!(ledgerTypes as readonly string[]).includes(type)) {
+      return Response.json({ message: "收支類型篩選不正確。" }, { status: 400 });
+    }
+    const keyword = readKeyword(searchParams);
+    const { page: requestedPage, pageSize } = readPageParams(searchParams);
+
     const organizationId = new ObjectId(user.organization.id);
     const userId = new ObjectId(user.id);
     const database = await getDatabase();
     const collection = await ledgerCollection();
-    const receipts = database.collection<ReceiptIncomeDocument>("receipts");
-    const [manualEntries, totals, receiptEntries, receiptTotal] = await Promise.all([
-      collection.find({ organizationId, createdBy: userId }).sort({ date: -1, createdAt: -1 }).limit(100).toArray(),
+
+    /* ---------------------------------------------------------------- summary
+       The totals always cover every record, never just the current page. */
+    const [totals, receiptTotal] = await Promise.all([
       collection.aggregate<{ _id: "IN" | "OUT"; total: number }>([
-      { $match: { organizationId, createdBy: userId } },
-      { $group: { _id: "$type", total: { $sum: "$amount" } } },
+        { $match: { organizationId, createdBy: userId } },
+        { $group: { _id: "$type", total: { $sum: "$amount" } } },
       ]).toArray(),
-      // Older ordinary receipts did not have a paymentStatus and remain paid
-      // for backwards compatibility. Quote-created drafts are explicitly
-      // pending, so they never become income until confirmation.
-      receipts.find({ organizationId, createdBy: userId, paymentStatus: { $ne: "pending" } }).sort({ issueDate: -1, createdAt: -1 }).limit(100).toArray(),
-      receipts.aggregate<{ total: number }>([
+      database.collection("receipts").aggregate<{ total: number }>([
+        // Older ordinary receipts had no paymentStatus and remain paid for
+        // backwards compatibility. Quote-created drafts are explicitly
+        // pending, so they never become income until confirmation.
         { $match: { organizationId, createdBy: userId, paymentStatus: { $ne: "pending" } } },
         { $group: { _id: null, total: { $sum: "$amount" } } },
       ]).toArray(),
     ]);
     const manualIncome = totals.find((total) => total._id === "IN")?.total ?? 0;
     const expense = totals.find((total) => total._id === "OUT")?.total ?? 0;
-    const receiptIncome = receiptTotal[0]?.total ?? 0;
-    const income = manualIncome + receiptIncome;
-    const entries = [
-      ...manualEntries.map(({ _id, amount, createdAt, date, description, type }) => ({
-        amount,
-        createdAt: createdAt.toISOString(),
-        date,
-        description,
-        id: _id.toHexString(),
-        source: "manual" as const,
-        type,
-      })),
-      ...receiptEntries.map(({ _id, amount, createdAt, issueDate, payerName, receiptNumber }) => ({
-        amount,
-        createdAt: createdAt.toISOString(),
-        date: issueDate,
-        description: `${receiptNumber} · ${payerName}`,
-        id: `receipt:${_id.toHexString()}`,
-        source: "receipt" as const,
-        type: "IN" as const,
-      })),
-    ].sort((left, right) => right.date.localeCompare(left.date) || right.createdAt.localeCompare(left.createdAt)).slice(0, 100);
+    const income = manualIncome + (receiptTotal[0]?.total ?? 0);
+
+    /* ------------------------------------------------------------------- list
+       Manual entries and receipt-backed income live in two collections, so the
+       page is cut across a union of both rather than in application memory. */
+    const manualMatch: Record<string, unknown> = { organizationId, createdBy: userId };
+    if (type !== "all") manualMatch.type = type;
+    if (keyword) manualMatch.description = keywordRegex(keyword);
+
+    const receiptMatch: Record<string, unknown> = { organizationId, createdBy: userId, paymentStatus: { $ne: "pending" } };
+    if (keyword) {
+      const expression = keywordRegex(keyword);
+      receiptMatch.$or = [{ receiptNumber: expression }, { payerName: expression }];
+    }
+    // Receipt-backed rows are always income, so an expense-only filter skips them.
+    const includeReceipts = type !== "OUT";
+
+    const listPipeline: Record<string, unknown>[] = [
+      { $match: manualMatch },
+      { $project: { amount: 1, createdAt: 1, date: 1, description: 1, source: { $literal: "manual" }, type: 1 } },
+    ];
+    if (includeReceipts) {
+      listPipeline.push({
+        $unionWith: {
+          coll: "receipts",
+          pipeline: [
+            { $match: receiptMatch },
+            {
+              $project: {
+                amount: 1,
+                createdAt: 1,
+                date: "$issueDate",
+                description: { $concat: ["$receiptNumber", " · ", "$payerName"] },
+                source: { $literal: "receipt" },
+                type: { $literal: "IN" },
+              },
+            },
+          ],
+        },
+      });
+    }
+
+    // Counted first so the requested page can be clamped, then only that page is
+    // read back — neither query loads the whole ledger.
+    const [counted] = await collection
+      .aggregate<{ value: number }>([...listPipeline, { $count: "value" }])
+      .toArray();
+    const listTotal = counted?.value ?? 0;
+    const { page, skip, totalPages } = resolvePage({ page: requestedPage, pageSize, total: listTotal });
+
+    const rows = listTotal
+      ? await collection
+          .aggregate<LedgerRow>([
+            ...listPipeline,
+            { $sort: { date: -1, createdAt: -1, _id: -1 } },
+            { $skip: skip },
+            { $limit: pageSize },
+          ])
+          .toArray()
+      : [];
+
+    const entries = rows.map((row) => ({
+      amount: row.amount,
+      createdAt: row.createdAt.toISOString(),
+      date: row.date,
+      description: row.description,
+      id: row.source === "receipt" ? `receipt:${row._id.toHexString()}` : row._id.toHexString(),
+      source: row.source,
+      type: row.type,
+    }));
 
     return Response.json({
-      summary: { balance: income - expense, expense, income },
       entries,
+      page,
+      pageSize,
+      summary: { balance: income - expense, expense, income },
+      total: listTotal,
+      totalPages,
     });
   } catch {
     return Response.json({ message: "無法讀取記帳資料。" }, { status: 503 });

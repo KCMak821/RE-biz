@@ -1,3 +1,5 @@
+import type { ReceiptTemplate } from "@/lib/receipt-template";
+
 /**
  * The record shapes the browser receives from `/api/**`. They mirror the
  * serialisers in the route handlers; nothing here changes the API contract.
@@ -77,6 +79,15 @@ export type QuoteLinks = {
 
 export type InvoiceStatus = "draft" | "unpaid" | "overdue" | "partially_paid" | "paid" | "void";
 
+/** One recorded receipt of money against an invoice. */
+export type InvoicePayment = {
+  amount: number;
+  createdAt: string;
+  id: string;
+  note: string;
+  paidAt: string;
+};
+
 export type Invoice = {
   companySnapshot: CompanySnapshot;
   createdAt?: string;
@@ -89,6 +100,10 @@ export type Invoice = {
   issueDate: string;
   lines: Array<DocumentLine & { subtotal: number }>;
   notes: string;
+  /** Total still to be collected: totalAmount − paidAmount. */
+  outstandingAmount: number;
+  paidAmount: number;
+  payments: InvoicePayment[];
   paymentStatus: "unpaid" | "partially_paid" | "paid";
   sentAt?: string;
   sourceQuoteId?: string;
@@ -125,6 +140,7 @@ export type SavedReceipt = {
   paymentMethod: string;
   paymentStatus?: "pending" | "paid";
   receiptNumber: string;
+  receiptTemplateSnapshot?: ReceiptTemplate;
   sourceQuoteId?: string;
   sourceQuoteNumber?: string;
 };

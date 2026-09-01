@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { canManageOrganizationSettings, canUseWorkspace, getCurrentUser, updateOrganizationReceiptTemplate } from "@/lib/auth";
-import type { ReceiptTemplate } from "@/lib/receipt-template";
+import { uploadedSealHorizontalLimit, uploadedSealLayout, type ReceiptTemplate } from "@/lib/receipt-template";
 
 export const runtime = "nodejs";
 
@@ -20,7 +20,19 @@ const templateSchema = z.object({
   showPaymentMethod: z.boolean(),
   showSignature: z.boolean(),
   showSeal: z.boolean(),
-}).strict();
+  uploadedSealOffsetX: z.number().int(),
+  uploadedSealOffsetY: z.number().int().min(uploadedSealLayout.minOffsetY).max(uploadedSealLayout.maxOffsetY),
+  uploadedSealScale: z.number().int().min(uploadedSealLayout.minScale).max(uploadedSealLayout.maxScale),
+}).strict().superRefine((template, context) => {
+  const limit = uploadedSealHorizontalLimit(template.uploadedSealScale);
+  if (Math.abs(template.uploadedSealOffsetX) > limit) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "印章水平位置超出簽署區安全範圍。",
+      path: ["uploadedSealOffsetX"],
+    });
+  }
+});
 
 export async function GET() {
   try {

@@ -291,3 +291,172 @@
 登入後看到的是「總覽」，上面寫著待處理事項（或在全新工作區寫著「確認公司資料 → 挑一個收據樣式 → 開立第一張收據」），右邊是四個帶說明的快速開始。答案是 Yes。
 
 剩下唯一還需要猜的地方，是被平台管理者關閉的功能仍會出現在側邊欄——那需要後端在 session 回傳 feature flags，列在下一階段的第一項。
+
+---
+
+# Acceptance Fix Round
+
+第一輪 UX Rework 的驗收發現六個 P0 與三個 P1 問題。這一輪只修這些問題，沒有重新設計介面、沒有動已經正常運作的流程。與第一輪不同的是，這一輪允許改後端，所以分頁、收款流程與 feature flag 都是真的做在 API 與資料層，不是前端假裝。
+
+## 1. Fixed
+
+### P0-1 收據列表沒有分頁，全部資料一次載入
+
+- **問題**：`GET /api/receipts` 回傳工作區內全部收據，搜尋與篩選也在瀏覽器端做。資料一多，列表頁會卡住，而且「搜尋」只搜得到已經載入的那些。
+- **修法**：查詢條件全部搬到 server。新增 `lib/query.ts` 統一四個列表 API 的分頁契約（`page` / `pageSize` 上限 100 / 頁碼超出範圍自動夾回最後一頁 / 關鍵字截斷 100 字並 escape regex 特殊字元）。`GET /api/receipts` 改為先 `countDocuments(filter)` 再 `.skip().limit()`，排序固定 `issueDate desc, createdAt desc, _id desc` 讓翻頁結果穩定。前端改用新的 `useListQuery`，狀態寫在網址上。
+- **影響檔案**：`lib/query.ts`（新增）、`app/api/receipts/route.ts`、`components/features/receipts/receipt-list.tsx`、`components/app/use-list-query.ts`（新增）、`components/app/pagination.tsx`（新增）
+- **驗證方式**：E2E `e2e/receipt-list-query.spec.ts` 建 25 張收據，斷言預設每頁 20 筆、翻頁寫入網址、重新載入回到同一頁、瀏覽器上一頁回到第 1 頁、搜尋跨全部資料且自動回第 1 頁、清除條件回到完整列表。另外以 API 直接驗過 `page=999` 夾回最後一頁、`pageSize=500` 被夾到 100、`status=xxx` 回 400。
+
+### P0-2 收支記帳沒有分頁
+
+- **問題**：`GET /api/ledger` 把手動分錄與收據轉入的收入全部撈出來，在 Node 端合併排序。
+- **修法**：用 `$unionWith` 讓 MongoDB 做合併，先跑一次 `$count` 取得總數，再跑一次帶 `$skip`/`$limit` 的查詢，兩次都是有界的（第一版草稿用 `$facet` 加極大 `$limit`，等於還是把全部資料實體化，已捨棄）。**摘要（收入／支出／結餘）故意維持在全部資料上計算**，不隨分頁或篩選變動——一個「結餘」如果會因為翻頁而改變，那個數字就沒有意義。`type=OUT` 時不 union 收據，因為收據只會是收入。
+- **影響檔案**：`app/api/ledger/route.ts`、`components/features/ledger/ledger-view.tsx`
+- **驗證方式**：以 API 直接驗過翻頁不重複不遺漏、摘要在各種篩選下不變、`type=OUT` 不含收據列、以收據編號搜尋能命中 union 進來的列。
+
+### P0-3 報價單與請款單列表沒有分頁
+
+- **問題**：同上，兩個列表都是一次全撈。
+- **修法**：兩個 API 都套 `lib/query.ts`。這裡有一個既有測試的語意衝突：原本 `total` 是「篩選前的總筆數」，但分頁需要「符合條件的筆數」才能算出頁數。作法是 `total` 一律代表符合條件的筆數，另外新增 `totalAll` 代表篩選前總數（前端用它區分「還沒建立過」與「這個條件找不到」），並把 `test/integration/invoices.test.mjs` 兩處斷言指向 `totalAll`，原本的測試意圖完整保留。
+- **影響檔案**：`app/api/quotes/route.ts`、`app/api/invoices/route.ts`、`components/features/quotes/quote-list.tsx`、`components/features/invoices/invoice-list.tsx`、`test/integration/invoices.test.mjs`
+- **驗證方式**：`npm test` 17/17 通過；另以 API 驗過 `total` 與 `totalAll` 在有／無篩選下的差異。
+
+### P0-4 `/receipts/[id]` 不存在，點列表只能開列印視窗
+
+- **問題**：收據是唯一沒有 detail page 的文件類型。使用者無法把某一張收據的網址傳給同事，也沒有地方看到它的完整內容與後續動作。
+- **修法**：新增 `GET /api/receipts/[receiptId]`（無效 id 或不屬於自己的工作區一律 404，不透露存在與否）與 `/receipts/[receiptId]` 路由。列表與詳情共用的 `serializeReceipt` 提到 `lib/receipt-store.ts`，避免兩邊欄位不一致。
+- **影響檔案**：`app/api/receipts/[receiptId]/route.ts`、`app/(workspace)/receipts/[receiptId]/page.tsx`（新增）、`components/features/receipts/receipt-detail.tsx`（新增）、`lib/receipt-store.ts`
+- **驗證方式**：E2E `e2e/receipt-to-ledger.spec.ts` 從列表點進 detail page、在該頁確認收款、再確認它出現在收支記帳。另以 API 驗過跨工作區與無效 id 都是 404。
+
+### P0-5 請款單沒有「登記收款」，狀態只能手動改
+
+- **問題**：`paymentStatus` 是一個可以隨手改的欄位，沒有金額依據。部分收款無法表達。
+- **修法**：改成由收款紀錄推導。請款單新增 `payments[]`（每筆有 `amount` / `paidAt` / `note` / `recordedBy` / `recordedAt`），`paymentStatus` 由 `sum(payments.amount)` 與請款總額比較得出：0 為 `unpaid`、未達總額為 `partially_paid`、達到或超過為 `paid`。金額比較全部用 `lib/money.ts` 的整數分計算，避免浮點誤差。新增 `POST /api/invoices/[invoiceId]/payments`：草稿／已作廢／已收足不能登記（409）、超收不能登記（409）、金額非正數 400、Viewer 403；寫入時用 `findOneAndUpdate` 帶上讀取時的 `status` 與 `paymentStatus` 作為樂觀鎖，兩個人同時登記不會互相覆蓋。
+- **影響檔案**：`lib/invoice.ts`、`lib/invoice-store.ts`、`app/api/invoices/[invoiceId]/payments/route.ts`（新增）、`app/api/invoices/[invoiceId]/route.ts`、`components/features/invoices/record-payment-dialog.tsx`（新增）、`components/features/invoices/invoice-detail.tsx`、`types/records.ts`
+- **驗證方式**：E2E `e2e/invoice-payments.spec.ts` 走完整條路：草稿（沒有「登記收款」按鈕）→ 標示為已發送 → 登記 4,000／10,000 → 部分付款 → 嘗試登記 99,999 被欄位級錯誤攔下 → 登記 6,000 → 已付款 → 按鈕消失 → 列表 `status=paid` 找得到、`status=unpaid` 找不到。
+
+### P0-6 未儲存變更保護只擋得住部分出口
+
+- **問題**：編輯器上有 `useDirtyGuard`，但側邊欄、Logo、breadcrumb、相關文件連結都是原生 `Link`，點下去直接走，輸入就沒了。
+- **修法**：`dirty-guard.tsx` 新增 `useGuardedNavigation()`，統一提供 `isDirty()` / `confirmDiscard()` / `guardedNavigate()`；新增 `GuardedLink`，是 `next/link` 的替換品，只在真的有未儲存內容時才攔，且 Cmd/Ctrl/Shift/中鍵點擊（開新視窗）一律放行。所有應用內導覽出口改用它。確認框全系統只有一種文案：標題「要放棄未儲存的變更嗎？」、說明「這一頁有尚未儲存的內容。離開後這些輸入不會保留，已經儲存過的資料不受影響。」、按鈕「離開並放棄變更」。
+- **影響檔案**：`components/app/dirty-guard.tsx`、`components/app/guarded-link.tsx`（新增）、`components/app/confirm.tsx`、`components/app/app-shell.tsx`、`components/app/nav-link.tsx`、`components/app/breadcrumb.tsx`、`components/app/button.tsx`、`components/features/quotes/quote-editor.tsx`、`components/features/invoices/invoice-editor.tsx`
+- **驗證方式**：E2E `e2e/unsaved-changes.spec.ts` 對側邊欄／Logo／Breadcrumb／取消按鈕四個出口各跑一次，並驗證沒有變更時導覽不會被打斷。
+
+### P1-7 總覽頁一個 API 失敗就整頁空白
+
+- **問題**：`Promise.all` 一失敗全部沒有，而且錯誤訊息直接把 HTTP 狀態碼寫給使用者看。
+- **修法**：每個區塊獨立載入（`ModuleResult<T>`）。403 顯示「這個功能目前未開放」，其他失敗顯示「資料暫時無法載入，請稍後再試。」並在頁面上方給一個帶「重新載入」的提示；能載入的區塊照常顯示。使用者看不到任何狀態碼或資料庫錯誤字樣。
+- **影響檔案**：`components/features/dashboard/dashboard-view.tsx`
+- **驗證方式**：手動讓個別 API 失敗，觀察其他區塊仍正常顯示；被關閉的模組顯示「未開放」而非錯誤。
+
+### P1-8 被關閉的功能仍出現在側邊欄
+
+- **問題**：feature flag 只存在後端，前端不知道，所以使用者會點進一個必然失敗的頁面。
+- **修法**：session 帶上 `features`。新增 `lib/workspace-features.ts` 承載這個型別與計算（獨立成一個檔案是為了避開 `lib/auth.ts` 與 `lib/platform-admin.ts` 的循環 import），被停權的工作區一律全部 false。側邊欄與總覽的快速動作依 `features.*` 決定顯示。**後端的權限檢查一個都沒有拿掉**——前端只是不再帶使用者去撞牆。
+- **影響檔案**：`lib/workspace-features.ts`（新增）、`lib/auth.ts`、`lib/platform-admin.ts`、`components/app/session.tsx`、`components/app/navigation.ts`、`components/features/dashboard/dashboard-view.tsx`
+- **驗證方式**：`npm test` 中既有的 feature flag 整合測試（關閉→API 擋、重新開啟→放行）維持通過。
+
+### P1-9 沒有任何前端回歸測試
+
+- **問題**：所有 UX 行為都只能手測，改一次就要全部再走一遍。
+- **修法**：加入 Playwright，跑在獨立的 port 3100 與獨立資料庫 `receipt_issuer_e2e`（`e2e/global-setup.ts` 每次先 drop 再 seed，並且拒絕非本機的 `MONGODB_URI`，避免有人不小心對正式資料庫跑測試）。開發資料庫完全不受影響。
+- **影響檔案**：`playwright.config.ts`、`e2e/`（新增）、`package.json`、`.gitignore`
+- **驗證方式**：`npm run test:e2e` → 9 passed。
+
+### 附帶修掉的一個 lint error
+
+`components/features/receipts/receipt-create.tsx` 的 `useMemo` 被寫在兩個 early return 之後，觸發 `react-hooks/rules-of-hooks`。這不是本輪任務產生的（來自批量列印功能），但它會讓 `npm run lint` 失敗、而 lint 通過是驗收條件，所以做了最小處理：把那一行 hook 移到 early return 之前，其他完全沒動。它依賴的 `batchText` 與 `draft` 在該位置都已經宣告，行為不變。
+
+## 2. Pagination
+
+四個列表共用同一套契約，行為一致。
+
+| 列表 | API | 預設每頁 | Server-side 搜尋欄位 | Server-side 篩選 |
+| --- | --- | --- | --- | --- |
+| 收據 | `GET /api/receipts?page&pageSize&q&status` | 20 | 收據編號、付款人、項目說明 | 收款狀態（all / pending / paid） |
+| 收支記帳 | `GET /api/ledger?page&pageSize&q&type&from&to` | 20 | 說明、收據編號＋付款人 | 類型（IN / OUT）、日期區間 |
+| 報價單 | `GET /api/quotes?page&pageSize&q&status` | 20 | 報價單編號、客戶名稱 | 狀態 |
+| 請款單 | `GET /api/invoices?page&pageSize&q&status` | 20 | 請款單編號、客戶名稱 | 狀態（含 partially_paid） |
+
+共通規格：
+
+- `pageSize` 上限 100，超過夾回 100；`page` 小於 1 或大於總頁數時夾回有效範圍，不會回一頁空白。
+- 回應一律包含 `page` / `pageSize` / `total` / `totalPages`；報價單與請款單另有 `totalAll`。
+- 排序都帶 `_id` 作為最後的 tie-breaker，所以翻頁不會出現同一筆資料在兩頁都看到。
+- 關鍵字先 escape regex 特殊字元再組 `RegExp`，使用者輸入 `.` 或 `(` 不會變成通用符。
+- 每個查詢的 `$match` 都保留原本的 `organizationId`（以及原本就有的 `createdBy`）條件，分頁只是加上 `skip`/`limit`，沒有放寬任何範圍。跨工作區隔離的整合測試維持通過。
+- 前端狀態寫在網址（`?page=2&q=…&status=paid`），所以重新載入、上一頁、把連結傳給同事都會看到同一個畫面。關鍵字 debounce 300ms 且用 `replace`（不污染上一頁歷史），改條件時自動回到第 1 頁。
+- `components/app/pagination.tsx` 是唯一的分頁 UI：只有一頁時整個元件不顯示，頁數多時中間收成 `…`，載入中時按鈕 disabled，手機上維持可點的觸控尺寸。
+
+## 3. Invoice Payment Flow
+
+狀態不再是手動欄位，而是收款紀錄的結果。
+
+```
+草稿 draft ──標示為已發送──▶ 未付款 unpaid
+                              │
+                              │ 登記收款（金額 < 尚未收款）
+                              ▼
+                        部分付款 partially_paid
+                              │
+                              │ 登記收款（收足）
+                              ▼
+                          已付款 paid
+```
+
+資料模型：請款單文件新增 `payments[]`，每筆 `{ amount, paidAt, note, recordedBy, recordedAt }`；`paymentStatus` 由已收總額推導；序列化時額外回傳 `paidAmount` 與 `outstandingAmount`，前端不自己算錢。既有請款單沒有 `payments` 欄位時視為空陣列，狀態與原本一致，不需要資料遷移。
+
+UX：
+
+- 「登記收款」只在 `status === "sent"` 且 `paymentStatus !== "paid"` 時出現，而且是該頁唯一的 Primary Action。草稿與已收足的請款單看不到它。
+- 對話框預設帶入尚未收款的金額（最常見的情況是一次收足），收款日期預設今天，備註選填。
+- 超收在送出前就以欄位級錯誤攔下並說明「不可超過尚未收款金額」；後端仍然會再擋一次（409），不依賴前端。
+- 摘要區固定顯示請款總額／已收金額／尚未收款三個數字，收足後改顯示「已全數收妥」。
+- 下方「收款紀錄」列出每一筆的日期、金額、備註與登記人，所以「為什麼是部分付款」永遠看得到原因。
+- Viewer 完全看不到「登記收款」，而且即使直接打 API 也會被 403 擋下。
+
+## 4. Unsaved Changes
+
+現在會先詢問的出口：
+
+| 出口 | 狀態 |
+| --- | --- |
+| 側邊欄導覽連結 | 已覆蓋 |
+| 手機抽屜內的導覽連結 | 已覆蓋 |
+| 左上角 Logo | 已覆蓋 |
+| Breadcrumb 各層 | 已覆蓋 |
+| `ButtonLink`（含「取消」、「回到列表」） | 已覆蓋 |
+| Detail page 的「相關文件」連結 | 已覆蓋 |
+| 表單內的取消按鈕 | 已覆蓋 |
+
+誠實列出還沒覆蓋的：
+
+- **瀏覽器的上一頁／下一頁**：App Router 目前沒有穩定的攔截點，`popstate` 只能在導覽已經發生之後才知道。硬做需要 history 特技，可靠性差且容易讓正常導覽壞掉，所以沒做。
+- **重新整理與關閉分頁**：沒有掛 `beforeunload`。它的原生對話框無法自訂文案、在不同瀏覽器行為不一，而且會干擾正常操作；要不要加應該是一個獨立決定。
+- **直接改網址列**：同上，前端攔不到。
+- 三者的共同結果是編輯器內容都在 client state，離開後重進要重填——這是現況，不是這輪新增的問題，列在 UX Debt。
+
+## 5. Tests
+
+全部實跑，不是「理論上可以」。
+
+| 檢查 | 指令 | 結果 |
+| --- | --- | --- |
+| Lint | `npm run lint` | 通過，0 error 0 warning |
+| Typecheck | `npm run typecheck` | 通過，無錯誤 |
+| 整合測試 | `npm test` | 17 pass / 0 fail |
+| E2E | `npm run test:e2e` | 9 pass / 0 fail |
+| Build | `npm run build` | Compiled successfully，`/receipts/[receiptId]` 已註冊 |
+
+E2E 覆蓋的流程：
+
+- **Flow A** `quote-to-invoice.spec.ts`：登入 → 建報價單 → 存草稿 → 標示已發送（已發送後不再提供編輯）→ 客戶已接受 → 轉為請款單。
+- **Flow B** `invoice-payments.spec.ts`：建請款單 → 發送 → 部分收款 → 超收被攔 → 收足 → 列表篩選找得到。
+- **Flow C** `receipt-to-ledger.spec.ts`：由報價單開收據 → 總覽出現待處理 → 從新的 detail page 確認收款 → 出現在收支記帳的收入。
+- **Flow D** `unsaved-changes.spec.ts`：四個出口各自會先詢問；沒有變更時不打斷。
+- **Flow E** `receipt-list-query.spec.ts`：搜尋、篩選、翻頁、重新載入、瀏覽器上一頁、清除條件。
+
+兩個測試環境上的注意事項，寫下來避免下次重踩：
+
+- Playwright 的 `getByLabel` 比對的是 `<label>` 的**文字內容**，不是 accessible name。原本「必填／選填」標記寫在 `<label>` 裡面，所以 `getByLabel("密碼", { exact: true })` 找不到欄位。修法是把標記移到 `<label>` 外面的 `.field-label-row`，`<label>` 只留欄位名稱——這本來就是比較正確的 markup，`aria-required` 已經承載了「必填」這個資訊，視覺標記加上 `aria-hidden` 後不再被讀第二次。
+- Session cookie 在 `next start` 下帶 `Secure`，Playwright 的 `page.request` 不會在 http 上送出它（瀏覽器本身對 localhost 有例外）。所以測試裡要 seed 資料時是用 `page.evaluate` 內的 `fetch`，走瀏覽器自己的 cookie jar，也就是應用程式實際發出的那個請求。

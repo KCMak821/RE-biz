@@ -11,13 +11,14 @@ import {
 import Link from "next/link";
 import { useEffect, useState, type ReactNode } from "react";
 
-import { ButtonLink } from "@/components/app/button";
+import { Button, ButtonLink } from "@/components/app/button";
 import { EmptyState } from "@/components/app/empty-state";
-import { SkeletonRows } from "@/components/app/feedback";
+import { Callout, SkeletonRows } from "@/components/app/feedback";
+import { FormActions } from "@/components/app/form";
 import { PageHeader } from "@/components/app/page-header";
 import { useWorkspace } from "@/components/app/session";
 import { Card, Stat, Stats, SummaryList } from "@/components/app/surfaces";
-import { request } from "@/lib/api";
+import { ApiError, request } from "@/lib/api";
 import { currencyAmount, daysUntil, formatDate, today } from "@/lib/format";
 import { help } from "@/lib/help-content";
 import { roleDescriptions, roleLabel } from "@/lib/status";
@@ -27,26 +28,50 @@ import type { Invoice, LedgerEntry, LedgerSummary, Quote, SavedReceipt } from "@
 const TODAY = today();
 const EXPIRY_WINDOW_DAYS = 7;
 
+/**
+ * Only a 403 means "this workspace cannot use the feature". Everything else is a
+ * real failure that has to be shown and retried, not silently swallowed.
+ */
+type ModuleResult<T> =
+  | { data: T; kind: "ok" }
+  | { kind: "unavailable" }
+  | { kind: "failed"; message: string };
+
 type Loaded = {
-  invoices: Invoice[] | null;
-  ledger: { entries: LedgerEntry[]; summary: LedgerSummary } | null;
-  quotes: Quote[] | null;
-  receipts: SavedReceipt[] | null;
+  invoices: ModuleResult<Invoice[]>;
+  ledger: ModuleResult<{ entries: LedgerEntry[]; summary: LedgerSummary }>;
+  quotes: ModuleResult<Quote[]>;
+  receipts: ModuleResult<SavedReceipt[]>;
 };
 
-type Activity = { amount?: number; at: string; href: string; icon: ReactNode; kind: string; title: string };
+const LOADING: Loaded = {
+  invoices: { kind: "unavailable" },
+  ledger: { kind: "unavailable" },
+  quotes: { kind: "unavailable" },
+  receipts: { kind: "unavailable" },
+};
 
-/**
- * A feature switched off by a platform admin answers 403. Treat that as “not
- * available in this workspace” instead of an error the user has to decode.
- */
-async function optional<T>(url: string): Promise<T | null> {
+/** Reads a module's data, keeping "switched off" and "broken" distinguishable. */
+async function loadModule<Payload, Value>(
+  url: string,
+  pick: (payload: Payload) => Value,
+): Promise<ModuleResult<Value>> {
   try {
-    return await request<T>(url);
-  } catch {
-    return null;
+    return { data: pick(await request<Payload>(url)), kind: "ok" };
+  } catch (error) {
+    if (error instanceof ApiError && error.isForbidden) return { kind: "unavailable" };
+    return {
+      kind: "failed",
+      message: error instanceof Error ? error.message : "資料暫時無法載入，請稍後再試。",
+    };
   }
 }
+
+function dataOf<T>(result: ModuleResult<T>, fallbackValue: T): T {
+  return result.kind === "ok" ? result.data : fallbackValue;
+}
+
+type Activity = { amount?: number; at: string; href: string; icon: ReactNode; kind: string; title: string };
 
 /**
  * The dashboard answers four questions: what needs doing today, what happened
@@ -54,36 +79,45 @@ async function optional<T>(url: string): Promise<T | null> {
  * here comes from an endpoint that already existed — nothing is invented.
  */
 export function DashboardView() {
-  const { canManageRecords, canManageSettings, currency, organization, role, user } = useWorkspace();
+  const { canManageRecords, canManageSettings, currency, features, organization, role, user } = useWorkspace();
   const [loading, setLoading] = useState(true);
-  const [data, setData] = useState<Loaded>({ invoices: null, ledger: null, quotes: null, receipts: null });
+  const [data, setData] = useState<Loaded>(LOADING);
+  const [version, setVersion] = useState(0);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
       setLoading(true);
       void Promise.all([
-        optional<{ receipts?: SavedReceipt[] }>("/api/receipts"),
-        optional<{ entries?: LedgerEntry[]; summary?: LedgerSummary }>("/api/ledger"),
-        optional<{ quotes?: Quote[] }>("/api/quotes"),
-        optional<{ invoices?: Invoice[] }>("/api/invoices"),
+        loadModule<{ receipts?: SavedReceipt[] }, SavedReceipt[]>("/api/receipts", (payload) => payload.receipts ?? []),
+        loadModule<{ entries?: LedgerEntry[]; summary?: LedgerSummary }, { entries: LedgerEntry[]; summary: LedgerSummary }>(
+          "/api/ledger",
+          (payload) => ({
+            entries: payload.entries ?? [],
+            summary: payload.summary ?? { balance: 0, expense: 0, income: 0 },
+          }),
+        ),
+        loadModule<{ quotes?: Quote[] }, Quote[]>("/api/quotes", (payload) => payload.quotes ?? []),
+        loadModule<{ invoices?: Invoice[] }, Invoice[]>("/api/invoices", (payload) => payload.invoices ?? []),
       ]).then(([receipts, ledger, quotes, invoices]) => {
-        setData({
-          invoices: invoices ? invoices.invoices ?? [] : null,
-          ledger: ledger
-            ? { entries: ledger.entries ?? [], summary: ledger.summary ?? { balance: 0, expense: 0, income: 0 } }
-            : null,
-          quotes: quotes ? quotes.quotes ?? [] : null,
-          receipts: receipts ? receipts.receipts ?? [] : null,
-        });
+        setData({ invoices, ledger, quotes, receipts });
         setLoading(false);
       });
     }, 0);
     return () => window.clearTimeout(timer);
-  }, []);
+  }, [version]);
 
-  const receipts = data.receipts ?? [];
-  const quotes = data.quotes ?? [];
-  const invoices = data.invoices ?? [];
+  const receipts = dataOf(data.receipts, []);
+  const quotes = dataOf(data.quotes, []);
+  const invoices = dataOf(data.invoices, []);
+  const ledger = data.ledger.kind === "ok" ? data.ledger.data : null;
+  const failures = (
+    [
+      ["收據", data.receipts],
+      ["收支記帳", data.ledger],
+      ["報價單", data.quotes],
+      ["請款單", data.invoices],
+    ] as const
+  ).flatMap(([label, result]) => (result.kind === "failed" ? [{ label, message: result.message }] : []));
 
   const pendingReceipts = receipts.filter((receipt) => receipt.paymentStatus === "pending");
   const awaitingQuotes = quotes.filter((quote) => quote.status === "sent");
@@ -95,6 +129,9 @@ export function DashboardView() {
   const overdueInvoices = invoices.filter((invoice) => invoice.effectiveStatus === "overdue");
   const unpaidInvoices = invoices.filter((invoice) => invoice.effectiveStatus === "unpaid");
   const draftInvoices = invoices.filter((invoice) => invoice.effectiveStatus === "draft");
+  // effectiveStatus already excludes fully paid invoices from unpaid/overdue,
+  // but a partly paid one still has money outstanding.
+  const partiallyPaidInvoices = invoices.filter((invoice) => invoice.effectiveStatus === "partially_paid");
 
   const todos = [
     overdueInvoices.length && {
@@ -111,6 +148,14 @@ export function DashboardView() {
       description: "由報價單建立的草稿收據；確認收到款項後才會列入收入。",
       href: "/receipts?status=pending",
       title: "收據等待確認收款",
+      tone: "warning" as const,
+    },
+    partiallyPaidInvoices.length && {
+      action: "登記剩餘收款",
+      count: partiallyPaidInvoices.length,
+      description: "已收到部分款項，還有餘額尚未收妥。",
+      href: "/invoices?status=partially_paid",
+      title: "請款單只收到部分款項",
       tone: "warning" as const,
     },
     expiringQuotes.length && {
@@ -166,7 +211,7 @@ export function DashboardView() {
     ...receipts.map((receipt) => ({
       amount: receipt.amount,
       at: receipt.createdAt,
-      href: "/receipts",
+      href: `/receipts/${receipt.id}`,
       icon: <ReceiptText aria-hidden="true" size={15} />,
       kind: "收據",
       title: `${receipt.receiptNumber} · ${receipt.payerName}`,
@@ -187,7 +232,7 @@ export function DashboardView() {
       kind: "請款單",
       title: `${invoice.invoiceNumber} · ${invoice.customerSnapshot.companyName || invoice.customerSnapshot.name}`,
     })),
-    ...(data.ledger?.entries ?? [])
+    ...(ledger?.entries ?? [])
       .filter((entry) => entry.source === "manual")
       .map((entry) => ({
         amount: entry.amount,
@@ -202,19 +247,21 @@ export function DashboardView() {
     .slice(0, 8);
 
   const isNewWorkspace =
-    !loading && !receipts.length && !quotes.length && !invoices.length && !(data.ledger?.entries.length ?? 0);
+    !loading && !receipts.length && !quotes.length && !invoices.length && !(ledger?.entries.length ?? 0);
 
+  // Driven by the session's feature switches, so a switched-off module never
+  // offers a shortcut into a page that would refuse it.
   const quickActions = [
-    data.receipts && canManageRecords
+    features.receipts && canManageRecords
       ? { description: "填寫付款人與金額，儲存後輸出 PDF。", href: "/receipts/new", icon: ReceiptText, label: "開立收據" }
       : null,
-    data.quotes && canManageRecords
+    features.quotations && canManageRecords
       ? { description: "成交前給客戶的報價文件。", href: "/quotes/new", icon: FileSignature, label: "建立報價單" }
       : null,
-    data.invoices && canManageRecords
+    features.invoices && canManageRecords
       ? { description: "向客戶請款的付款通知。", href: "/invoices/new", icon: FileText, label: "建立請款單" }
       : null,
-    data.ledger && canManageRecords
+    features.accounting && canManageRecords
       ? { description: "補記沒有開收據的收入或支出。", href: "/ledger", icon: BookOpenText, label: "記一筆收支" }
       : null,
   ].filter(Boolean) as Array<{ description: string; href: string; icon: typeof ReceiptText; label: string }>;
@@ -227,31 +274,46 @@ export function DashboardView() {
         title="總覽"
       />
 
+      {failures.length ? (
+        <Callout title="部分資料暫時無法載入" tone="warning">
+          <p>
+            {failures.map((failure) => failure.label).join("、")}
+            的資料這次沒有載入成功，其他區塊仍然是最新的。
+          </p>
+          <p>{failures[0].message}</p>
+          <FormActions>
+            <Button onClick={() => setVersion((current) => current + 1)} size="sm" variant="secondary">
+              重新載入
+            </Button>
+          </FormActions>
+        </Callout>
+      ) : null}
+
       {loading ? (
         <div className="card">
           <SkeletonRows label="正在載入總覽" rows={7} />
         </div>
       ) : (
         <>
-          {data.ledger ? (
+          {ledger ? (
             <Stats>
               <Stat
                 hint="包含已確認收款的收據與手動收入"
                 label="累計收入"
-                tone={data.ledger.summary.income ? "income" : undefined}
-                value={currencyAmount(currency, data.ledger.summary.income)}
+                tone={ledger.summary.income ? "income" : undefined}
+                value={currencyAmount(currency, ledger.summary.income)}
               />
               <Stat
                 hint="所有手動記錄的支出"
                 label="累計支出"
-                tone={data.ledger.summary.expense ? "expense" : undefined}
-                value={currencyAmount(currency, data.ledger.summary.expense)}
+                tone={ledger.summary.expense ? "expense" : undefined}
+                value={currencyAmount(currency, ledger.summary.expense)}
               />
-              <Stat hint="收入減支出" label="目前餘額" value={currencyAmount(currency, data.ledger.summary.balance)} />
+              <Stat hint="收入減支出" label="目前餘額" value={currencyAmount(currency, ledger.summary.balance)} />
             </Stats>
           ) : null}
 
-          <div className="dash-grid" style={{ marginTop: data.ledger ? 18 : 0 }}>
+          <div className="dash-grid" style={{ marginTop: ledger ? 18 : 0 }}>
             <div className="dash-stack">
               <Card description="按照急迫程度排序，點進去就能直接處理。" title="待處理">
                 {todos.length ? (

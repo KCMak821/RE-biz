@@ -3,11 +3,32 @@ import { z } from "zod";
 
 import { canManageRecords, getCurrentUser } from "@/lib/auth";
 import { canUseWorkspaceFeature } from "@/lib/platform-admin";
-import { receiptsCollection } from "@/lib/receipt-store";
+import { receiptsCollection, serializeReceipt } from "@/lib/receipt-store";
 
 export const runtime = "nodejs";
 
 const updateSchema = z.object({ paymentStatus: z.literal("paid") }).strict();
+
+export async function GET(_: Request, { params }: { params: Promise<{ receiptId: string }> }) {
+  const { receiptId } = await params;
+  if (!ObjectId.isValid(receiptId)) return Response.json({ message: "收據不存在。" }, { status: 404 });
+
+  try {
+    const user = await getCurrentUser();
+    if (!user) return Response.json({ message: "請先登入。" }, { status: 401 });
+    if (!await canUseWorkspaceFeature(user, "receipts")) return Response.json({ message: "此工作區目前無法使用收據功能。" }, { status: 403 });
+
+    const receipt = await (await receiptsCollection()).findOne({
+      _id: new ObjectId(receiptId),
+      organizationId: new ObjectId(user.organization.id),
+      createdBy: new ObjectId(user.id),
+    });
+    if (!receipt) return Response.json({ message: "收據不存在。" }, { status: 404 });
+    return Response.json({ receipt: serializeReceipt(receipt) });
+  } catch {
+    return Response.json({ message: "無法讀取收據資料。" }, { status: 503 });
+  }
+}
 
 export async function PUT(request: Request, { params }: { params: Promise<{ receiptId: string }> }) {
   const parsed = updateSchema.safeParse(await request.json().catch(() => null));

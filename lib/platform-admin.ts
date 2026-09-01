@@ -3,8 +3,10 @@ import { ObjectId } from "mongodb";
 import { getCurrentPlatformAdmin, type AccountStatus, type OrganizationDocument, type PlatformAdminActor, type PlatformRole, type UserDocument, type WorkspaceStatus } from "@/lib/auth";
 import { getDatabase } from "@/lib/mongodb";
 
-export const workspaceFeatureKeys = ["receipts", "accounting", "quotations", "invoices"] as const;
-export type WorkspaceFeatureKey = typeof workspaceFeatureKeys[number];
+// Feature keys and the raw switch reader live in lib/workspace-features so that
+// lib/auth can put them on the session without importing this module.
+export { isWorkspaceFeatureEnabled, workspaceFeatureKeys, type WorkspaceFeatureKey } from "@/lib/workspace-features";
+import { isWorkspaceFeatureEnabled, workspaceFeatureKeys, type WorkspaceFeatureKey } from "@/lib/workspace-features";
 export const platformAuditActions = [
   "WORKSPACE_SUSPENDED",
   "WORKSPACE_REACTIVATED",
@@ -118,11 +120,6 @@ async function workspaceFeatureRows(organizationId: ObjectId) {
   const rows = await (await getDatabase()).collection<WorkspaceFeatureDocument>("workspaceFeatures").find({ organizationId }).toArray();
   const enabledByKey = new Map(rows.map((row) => [row.featureKey, row.enabled]));
   return workspaceFeatureKeys.map((featureKey) => ({ enabled: enabledByKey.get(featureKey) ?? true, featureKey }));
-}
-
-export async function isWorkspaceFeatureEnabled(organizationId: ObjectId, featureKey: WorkspaceFeatureKey) {
-  const feature = await (await getDatabase()).collection<WorkspaceFeatureDocument>("workspaceFeatures").findOne({ organizationId, featureKey });
-  return feature?.enabled ?? true;
 }
 
 export async function canUseWorkspaceFeature(user: { organization: { id: string; status: WorkspaceStatus } }, featureKey: WorkspaceFeatureKey) {

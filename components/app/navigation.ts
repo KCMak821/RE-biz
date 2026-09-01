@@ -1,3 +1,4 @@
+import type { WorkspaceFeatureKey, WorkspaceFeatures } from "@/lib/workspace-features";
 import {
   BookOpenText,
   Building2,
@@ -24,6 +25,8 @@ export type NavItem = {
   adminOnly?: boolean;
   description: string;
   external?: boolean;
+  /** Hidden when a platform admin has switched this feature off. */
+  feature?: WorkspaceFeatureKey;
   href: string;
   icon: LucideIcon;
   label: string;
@@ -50,12 +53,14 @@ export const navigation: NavGroup[] = [
     items: [
       {
         description: "開立、輸出並追蹤每一張收據的收款狀態。",
+        feature: "receipts",
         href: "/receipts",
         icon: ReceiptText,
         label: "收據",
       },
       {
         description: "查看現金流，補記沒有開收據的收入與所有支出。",
+        feature: "accounting",
         href: "/ledger",
         icon: BookOpenText,
         label: "收支記帳",
@@ -67,12 +72,14 @@ export const navigation: NavGroup[] = [
     items: [
       {
         description: "成交前給客戶的報價；客戶接受後可轉為請款單或收據。",
+        feature: "quotations",
         href: "/quotes",
         icon: FileSignature,
         label: "報價單",
       },
       {
         description: "向客戶請款的付款通知，可追蹤到期與付款狀態。",
+        feature: "invoices",
         href: "/invoices",
         icon: FileText,
         label: "請款單",
@@ -84,12 +91,14 @@ export const navigation: NavGroup[] = [
     items: [
       {
         description: "客戶聯絡與開票資料，報價單和請款單都會帶入。",
+        feature: "quotations",
         href: "/customers",
         icon: Users,
         label: "客戶",
       },
       {
         description: "常用的商品與服務及預設單價，加快報價速度。",
+        feature: "quotations",
         href: "/items",
         icon: Package,
         label: "商品與服務",
@@ -152,16 +161,23 @@ export function navItemFor(pathname: string) {
 
 export function visibleNavigation({
   canManageSettings,
+  features,
   isSuperAdmin,
 }: {
   canManageSettings: boolean;
+  features: WorkspaceFeatures;
   isSuperAdmin: boolean;
 }) {
   return navigation
     .map((group) => ({
       ...group,
       items: group.items.filter(
-        (item) => (!item.adminOnly || canManageSettings) && (!item.superAdminOnly || isSuperAdmin),
+        (item) =>
+          (!item.adminOnly || canManageSettings) &&
+          (!item.superAdminOnly || isSuperAdmin) &&
+          // Hiding a switched-off feature is presentation only; the API keeps
+          // rejecting it for anyone who types the URL directly.
+          (!item.feature || features[item.feature]),
       ),
     }))
     .filter((group) => group.items.length > 0);

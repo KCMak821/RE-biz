@@ -113,10 +113,22 @@ function FieldFrame({
 }) {
   return (
     <div className={span ? "field field-span" : "field"}>
-      <label className="field-label" htmlFor={labelFor}>
-        <span>{label}</span>
-        {required ? <b className="field-req">必填</b> : <em className="field-optional">選填</em>}
-      </label>
+      {/* The marker sits beside the <label>, not inside it, so the label's text is
+          exactly the field name. `aria-required` already carries the requirement. */}
+      <div className="field-label-row">
+        <label className="field-label" htmlFor={labelFor}>
+          {label}
+        </label>
+        {required ? (
+          <b aria-hidden="true" className="field-req">
+            必填
+          </b>
+        ) : (
+          <em aria-hidden="true" className="field-optional">
+            選填
+          </em>
+        )}
+      </div>
       {children}
       {error ? (
         <p className="field-error" id={errorId} role="alert">
@@ -255,9 +267,9 @@ export function ReadOnlyField({
 }) {
   return (
     <div className={span ? "field field-span" : "field"}>
-      <span className="field-label">
-        <span>{label}</span>
-      </span>
+      <div className="field-label-row">
+        <span className="field-label">{label}</span>
+      </div>
       <output className="control control-readonly">{value}</output>
       {hint ? <p className="field-hint">{hint}</p> : null}
     </div>

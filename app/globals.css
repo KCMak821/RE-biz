@@ -461,7 +461,8 @@ a { color: var(--forest); }
 .field-span { grid-column: 1 / -1; }
 
 .field { display: grid; align-content: start; gap: 6px; min-width: 0; }
-.field-label { display: flex; align-items: baseline; gap: 7px; color: var(--ink-soft); font-size: 12px; font-weight: 700; }
+.field-label-row { display: flex; align-items: baseline; gap: 7px; }
+.field-label { color: var(--ink-soft); font-size: 12px; font-weight: 700; }
 .field-req { color: var(--error); font-size: 10px; font-weight: 700; }
 .field-optional { color: var(--muted-soft); font-size: 10px; font-style: normal; font-weight: 400; }
 .field-hint { margin: 0; color: var(--muted); font-size: 11.5px; line-height: 1.5; }
@@ -540,6 +541,34 @@ a { color: var(--forest); }
 .list-card { border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--paper); box-shadow: var(--shadow-card); }
 .list-card > .admin-scroll:first-child { border-radius: var(--r-lg) var(--r-lg) 0 0; }
 .list-card-foot { border-top: 1px solid var(--line-soft); background: var(--surface-sunk); padding: 11px 20px; color: var(--muted); font-size: 11.5px; }
+
+/* pager ------------------------------------------------------------------- */
+
+.pager { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 14px; }
+.pager-pages { display: flex; align-items: center; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.pager-step, .pager-page {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: 36px;
+  min-height: 36px;
+  border: 1px solid #bcc6bd;
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--ink-soft);
+  padding: 0 10px;
+  font-size: 13px;
+  font-weight: 700;
+}
+.pager-step:hover:not(:disabled), .pager-page:hover:not(:disabled) { border-color: var(--forest); background: var(--forest-tint); color: var(--forest); }
+.pager-step:disabled, .pager-page:disabled { cursor: not-allowed; opacity: .45; }
+.pager-page.is-current { border-color: var(--forest); background: var(--forest); color: #fff; }
+.pager-page.is-current:focus-visible { outline-color: #fff; outline-offset: -4px; }
+.pager-gap { padding: 0 2px; color: var(--muted-soft); }
+/* The page counter is the mobile substitute for the number row. */
+.pager-status { display: none; margin: 0; color: var(--muted); font-size: 12.5px; }
+.pager > .pager-step:last-child { margin-left: auto; }
 
 .dtable { width: 100%; border-collapse: collapse; font-size: 13px; }
 .dtable th {
@@ -729,6 +758,10 @@ a { color: var(--forest); }
 .builder-preview-label { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--muted); font-size: 12px; font-weight: 700; }
 .builder-preview .receipt-paper { max-width: 100%; min-height: 0; box-shadow: var(--shadow-card); }
 .builder-scale { border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface-sunk); padding: 16px; }
+.receipt-layout-select { display: grid; gap: 6px; color: var(--ink); font-size: 12px; font-weight: 700; }
+.receipt-layout-select select { width: 100%; min-height: 38px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--paper); padding: 0 10px; color: var(--ink); font-size: 13px; }
+.receipt-print-pages--preview { margin-top: 16px; }
+.receipt-print-pages--preview .receipt-print-page { box-shadow: var(--shadow-card); }
 
 .tabs { display: inline-grid; grid-auto-flow: column; margin-bottom: 20px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface-sunk); padding: 3px; }
 .tab {
@@ -797,6 +830,13 @@ a { color: var(--forest); }
 .seal-upload label:has(input:disabled) { cursor: not-allowed; opacity: .55; }
 .seal-upload label input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
 .seal-upload small { color: var(--muted-soft); font-size: 11px; }
+.seal-layout-adjustment { display: grid; gap: 13px; margin-top: 14px; border: 1px solid #cbd8ca; border-radius: var(--r-md); background: #f4f8f1; padding: 14px; }
+.seal-layout-adjustment h3 { margin: 0; color: var(--ink); font-size: 13px; }
+.seal-layout-adjustment p { margin: 4px 0 0; color: var(--muted); font-size: 11.5px; line-height: 1.5; }
+.seal-layout-control { display: grid; gap: 7px; color: var(--ink-soft); font-size: 12px; font-weight: 700; }
+.seal-layout-control > span { display: flex; justify-content: space-between; gap: 12px; }
+.seal-layout-control output { color: var(--forest); font-variant-numeric: tabular-nums; }
+.seal-layout-control input { width: 100%; accent-color: var(--forest); }
 
 /* ------------------------------------------------- member & customer bits */
 
@@ -870,6 +910,8 @@ a { color: var(--forest); }
 .signature-line { border-top: 1px solid #56645c; margin-bottom: 7px; }
 .company-seal { display: block; width: 94px; height: 94px; margin: 0 auto 8px; color: #0a2679; overflow: visible; transform: translateX(24px); }
 .company-seal-uploaded { object-fit: contain; }
+.uploaded-seal-frame { box-sizing: border-box; width: 100%; height: var(--uploaded-seal-frame-height); margin-top: var(--uploaded-seal-frame-margin-top); padding-top: var(--uploaded-seal-frame-padding-top); overflow: hidden; }
+.uploaded-seal-frame .company-seal-uploaded { position: relative; left: calc(50% + var(--uploaded-seal-offset-x)); width: var(--uploaded-seal-size); height: var(--uploaded-seal-size); margin: 0; transform: translateX(-50%); }
 .seal-outer-ring, .seal-inner-ring { fill: none; stroke: currentcolor; }
 .seal-outer-ring { stroke-width: 5.1; }
 .seal-outer-ring-inner { stroke-width: 2.4; opacity: 1; }
@@ -881,6 +923,47 @@ a { color: var(--forest); }
 .receipt-disclaimer { margin: 37px 0 0; padding-top: 14px; border-top: 1px solid #dce0d9; color: #7b857e; font-size: 9px; line-height: 1.5; }
 .receipt-paper.logo-center .receipt-company-logo { margin-right: auto; margin-left: auto; }
 .receipt-paper.logo-right .receipt-company-logo { margin-right: 0; margin-left: auto; }
+.receipt-paper--compact { box-sizing: border-box; min-height: 0; margin: 0; padding: 14px 18px 12px; box-shadow: none; }
+.receipt-paper--compact .receipt-topline { height: 4px; }
+.receipt-paper--compact .receipt-header { gap: 16px; padding-bottom: 11px; }
+.receipt-paper--compact .issuer-block { font-size: 10px; line-height: 1.45; }
+.receipt-paper--compact .receipt-company-logo { max-width: 78px; height: 28px; margin-bottom: 5px; }
+.receipt-paper--compact .issuer-block .issuer-name { margin-bottom: 3px; font-size: 14px; }
+.receipt-paper--compact .receipt-title { font-size: 21px; }
+.receipt-paper--compact .receipt-title-cn { margin-top: 2px; font-size: 10px; }
+.receipt-paper--compact .receipt-meta { margin: 10px 0; }
+.receipt-paper--compact .receipt-meta div { padding: 6px 8px; }
+.receipt-paper--compact .receipt-meta span, .receipt-paper--compact .bill-to > span, .receipt-paper--compact .amount-words > span, .receipt-paper--compact .payment-details > span, .receipt-paper--compact .signature-block span { font-size: 9px; }
+.receipt-paper--compact .receipt-meta strong { margin-top: 2px; font-size: 11px; }
+.receipt-paper--compact .receipt-source-quote { margin: -3px 0 8px; font-size: 9px; }
+.receipt-paper--compact .bill-to { margin-bottom: 10px; }
+.receipt-paper--compact .bill-to strong { margin-top: 3px; font-size: 14px; }
+.receipt-paper--compact .bill-to p { margin-top: 2px; font-size: 9px; }
+.receipt-paper--compact .table-header, .receipt-paper--compact .table-row, .receipt-paper--compact .table-total { grid-template-columns: minmax(0, 1fr) 130px; }
+.receipt-paper--compact .table-header { font-size: 9px; }
+.receipt-paper--compact .table-header span, .receipt-paper--compact .table-row span, .receipt-paper--compact .table-row strong, .receipt-paper--compact .table-total span, .receipt-paper--compact .table-total strong { padding: 7px 8px; }
+.receipt-paper--compact .table-row { min-height: 44px; font-size: 11px; }
+.receipt-paper--compact .table-row strong { font-size: 12px; }
+.receipt-paper--compact .table-total { font-size: 10px; }
+.receipt-paper--compact .receipt-line-items-table { font-size: 10px; }
+.receipt-paper--compact .receipt-line-items-table th, .receipt-paper--compact .receipt-line-items-table td { padding: 5px 6px; }
+.receipt-paper--compact .receipt-line-items-table thead { font-size: 8px; }
+.receipt-paper--compact .receipt-line-items-table tbody td:first-child small { margin-top: 2px; font-size: 9px; }
+.receipt-paper--compact .amount-words { margin-top: 10px; }
+.receipt-paper--compact .amount-words strong { margin-top: 3px; font-size: 11px; }
+.receipt-paper--compact .receipt-bottom { gap: 24px; margin-top: 14px; }
+.receipt-paper--compact .payment-details strong { margin-top: 3px; font-size: 10px; }
+.receipt-paper--compact .payment-details p { margin-top: 4px; font-size: 9px; }
+.receipt-paper--compact .signature-block { min-width: 132px; }
+.receipt-paper--compact .signature-line { margin-bottom: 4px; }
+.receipt-paper--compact .company-seal { width: 54px; height: 54px; margin-bottom: 4px; transform: translateX(16px); }
+.receipt-paper--compact .uploaded-seal-frame .company-seal-uploaded { width: var(--uploaded-seal-size); height: var(--uploaded-seal-size); margin: 0; transform: translateX(-50%); }
+.receipt-paper--compact .receipt-disclaimer { margin-top: 12px; padding-top: 6px; font-size: 9px; }
+.receipt-print-page--paper-saving { display: grid; grid-template-rows: minmax(0, 1fr) 13px minmax(0, 1fr); gap: 0; box-sizing: border-box; width: min(100%, 210mm); aspect-ratio: 210 / 297; margin: 0 auto; padding: 8mm 9mm; background: #fff; }
+.receipt-print-page--paper-saving > .receipt-paper { width: 100%; height: 100%; overflow: hidden; }
+.receipt-print-page--single { grid-template-rows: minmax(0, 1fr) 13px minmax(0, 1fr); }
+.receipt-cut-guide { display: grid; align-items: center; grid-template-columns: 1fr auto 1fr; gap: 9px; color: #a3a8a4; font-size: 8px; letter-spacing: .08em; text-align: center; }
+.receipt-cut-guide::before, .receipt-cut-guide::after { height: 1px; border-top: 1px dashed #b7bcb8; content: ""; }
 .template-minimal { border: 1px solid #e0e2dd; box-shadow: none; }
 .template-minimal .receipt-topline { height: 3px; }
 .template-minimal .receipt-header { border-bottom-color: #e4e6e2; }
@@ -888,6 +971,8 @@ a { color: var(--forest); }
 .template-formal { border: 1px solid #bec6d0; }
 .template-formal .receipt-topline { height: 11px; }
 .template-formal .receipt-title { font-size: 27px; letter-spacing: .1em; }
+.receipt-paper--compact.template-formal .receipt-topline { height: 4px; }
+.receipt-paper--compact.template-formal .receipt-title { font-size: 21px; }
 
 .quote-paper { width: min(100%, 840px); min-height: 1050px; margin: 0 auto; background: #fffefa; box-shadow: var(--shadow-paper); padding: 56px 58px; color: #1e2925; }
 .quote-paper-header { display: flex; justify-content: space-between; gap: 36px; border-bottom: 4px solid var(--forest); padding-bottom: 25px; }
@@ -972,6 +1057,12 @@ a { color: var(--forest); }
   .dcard-actions .row-actions { flex-wrap: wrap; justify-content: flex-start; width: 100%; }
   .dcard-actions .btn { min-height: 36px; }
 
+  /* A row of page numbers is unusable with a thumb: swap it for a counter. */
+  .pager-pages { display: none; }
+  .pager-status { display: block; flex: 1 1 auto; text-align: center; }
+  .pager-step { flex: 0 0 auto; min-height: 40px; }
+  .pager > .pager-step:last-child { margin-left: 0; }
+
   .summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .toggle-grid, .seal-picker, .template-picker { grid-template-columns: 1fr; }
   .receipt-paper { padding: 30px 20px 24px; }
@@ -1032,8 +1123,53 @@ a { color: var(--forest); }
   .receipt-line-items-table tr { break-inside: avoid; page-break-inside: avoid; }
   .receipt-line-items-table tfoot { display: table-row-group; }
 
+  /* The paper-saving batch layout owns page breaking. Individual receipts are
+     compact panels within that one A4 page, never separate pages themselves. */
+  .receipt-print-pages--paper-saving { display: block; }
+  .receipt-print-page--paper-saving {
+    width: 210mm;
+    height: 297mm;
+    aspect-ratio: auto;
+    margin: 0;
+    padding: 8mm 9mm;
+    break-after: page;
+    page-break-after: always;
+    overflow: hidden;
+  }
+  .receipt-print-page--paper-saving:last-child { break-after: auto; page-break-after: auto; }
+  .receipt-print-page--paper-saving > .receipt-paper {
+    break-after: auto;
+    break-inside: avoid;
+    page-break-after: auto;
+    page-break-inside: avoid;
+  }
+  .receipt-print-page--paper-saving > .receipt-paper--compact { padding: 4.2mm 5mm 3.8mm; }
+  .receipt-print-page--paper-saving .receipt-cut-guide { break-inside: avoid; page-break-inside: avoid; }
+
   .quote-paper { width: 100%; max-width: none; min-height: auto; margin: 0; padding: 20mm 18mm; box-shadow: none; }
   .quote-paper-table thead { display: table-header-group; }
   .quote-paper-table tr { break-inside: avoid; page-break-inside: avoid; }
   .quote-paper-header, .quote-bill-to, .quote-paper-notes { break-inside: avoid; page-break-inside: avoid; }
+}
+
+/* invoice payment history ------------------------------------------------- */
+
+.payment-list { display: grid; margin: 0; padding: 0; list-style: none; }
+.payment-row {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 140px) minmax(0, 1fr);
+  align-items: baseline;
+  gap: 14px;
+  border-bottom: 1px solid var(--line-soft);
+  padding: 11px 0;
+}
+.payment-row:last-child { border-bottom: 0; }
+.payment-date { color: var(--muted); font-size: 12.5px; }
+.payment-amount { color: var(--tone-success-fg); font-size: 14px; }
+.payment-note { overflow-wrap: anywhere; color: var(--ink-soft); font-size: 12.5px; }
+
+@media (max-width: 560px) {
+  .payment-row { grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; }
+  .payment-amount { justify-self: end; }
+  .payment-note { grid-column: 1 / -1; color: var(--muted); }
 }

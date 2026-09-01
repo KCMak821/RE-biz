@@ -1,5 +1,9 @@
-import Link from "next/link";
+"use client";
+
+import type Link from "next/link";
 import type { ComponentProps, ReactNode } from "react";
+
+import { GuardedLink } from "@/components/app/guarded-link";
 
 export type ButtonVariant = "primary" | "secondary" | "ghost" | "danger" | "link";
 export type ButtonSize = "md" | "sm";
@@ -72,9 +76,9 @@ export function ButtonLink({
   variant?: ButtonVariant;
 }) {
   return (
-    <Link {...props} className={classes({ block, className, size, variant })}>
+    <GuardedLink {...props} className={classes({ block, className, size, variant })}>
       {icon}
       {children}
-    </Link>
+    </GuardedLink>
   );
 }

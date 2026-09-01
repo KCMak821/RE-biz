@@ -1,7 +1,8 @@
 "use client";
 
-import Link from "next/link";
 import type { ReactNode } from "react";
+
+import { GuardedLink } from "@/components/app/guarded-link";
 
 /**
  * One list renderer for every module. On a wide screen it is a table; below
@@ -61,9 +62,9 @@ export function DataTable<Row>({
                 {columns.map((column, index) => (
                   <td className={column.align === "end" ? "is-end" : undefined} key={column.key}>
                     {href && index === 0 ? (
-                      <Link className="dtable-row-link" href={href}>
+                      <GuardedLink className="dtable-row-link" href={href}>
                         {column.cell(row)}
-                      </Link>
+                      </GuardedLink>
                     ) : (
                       column.cell(row)
                     )}
@@ -83,7 +84,7 @@ export function DataTable<Row>({
             <li className="dcard" key={rowKey(row)}>
               <div className="dcard-top">
                 <div className="dcard-primary">
-                  {href ? <Link href={href}>{primary.cell(row)}</Link> : primary.cell(row)}
+                  {href ? <GuardedLink href={href}>{primary.cell(row)}</GuardedLink> : primary.cell(row)}
                 </div>
                 {status ? <div className="dcard-status">{status.cell(row)}</div> : null}
               </div>

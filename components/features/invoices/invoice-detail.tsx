@@ -1,6 +1,6 @@
 "use client";
 
-import { Ban, FileDown, Pencil, Send } from "lucide-react";
+import { Ban, Banknote, FileDown, Pencil, Send } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 import { Button, ButtonLink } from "@/components/app/button";
@@ -11,9 +11,10 @@ import { PageHeader } from "@/components/app/page-header";
 import { MenuItem, RowActions } from "@/components/app/row-actions";
 import { useWorkspace } from "@/components/app/session";
 import { StatusBadge } from "@/components/app/status-badge";
-import { NextStep, RelatedDocuments, SummaryList } from "@/components/app/surfaces";
+import { Card, NextStep, RelatedDocuments, SummaryList } from "@/components/app/surfaces";
 import { notify } from "@/components/app/toast";
 import { InvoicePaper } from "@/components/features/invoices/invoice-paper";
+import { RecordPaymentDialog } from "@/components/features/invoices/record-payment-dialog";
 import { ApiError, request } from "@/lib/api";
 import { currencyAmount, daysUntil, formatDate, today } from "@/lib/format";
 import { help } from "@/lib/help-content";
@@ -30,6 +31,7 @@ export function InvoiceDetail({ invoiceId }: { invoiceId: string }) {
   const [error, setError] = useState("");
   const [blocked, setBlocked] = useState<string | null>(null);
   const [working, setWorking] = useState(false);
+  const [recording, setRecording] = useState(false);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -123,7 +125,11 @@ export function InvoiceDetail({ invoiceId }: { invoiceId: string }) {
   }
 
   const remaining = daysUntil(invoice.dueDate, TODAY);
+  const canRecordPayment =
+    canManageRecords && invoice.status === "sent" && invoice.paymentStatus !== "paid";
 
+  /* One primary action, decided by where the invoice is in its life: send it,
+     then collect against it. */
   const primaryAction =
     canManageRecords && invoice.status === "draft" ? (
       <Button
@@ -133,6 +139,14 @@ export function InvoiceDetail({ invoiceId }: { invoiceId: string }) {
         variant="primary"
       >
         標示為已發送
+      </Button>
+    ) : canRecordPayment ? (
+      <Button
+        icon={<Banknote aria-hidden="true" size={16} />}
+        onClick={() => setRecording(true)}
+        variant="primary"
+      >
+        登記收款
       </Button>
     ) : null;
 
@@ -185,7 +199,15 @@ export function InvoiceDetail({ invoiceId }: { invoiceId: string }) {
                   ? `${formatDate(invoice.dueDate)}（還有 ${remaining} 天）`
                   : formatDate(invoice.dueDate),
           },
-          { label: "應付總額", value: currencyAmount(currency, invoice.totalAmount) },
+          { label: "請款總額", value: currencyAmount(currency, invoice.totalAmount) },
+          { label: "已收金額", value: currencyAmount(currency, invoice.paidAmount) },
+          {
+            label: "尚未收款",
+            value:
+              invoice.outstandingAmount > 0
+                ? currencyAmount(currency, invoice.outstandingAmount)
+                : "已全數收妥",
+          },
         ]}
       />
 
@@ -199,10 +221,37 @@ export function InvoiceDetail({ invoiceId }: { invoiceId: string }) {
 
       <NextStep>{describeNextStep(invoice, canManageRecords, remaining)}</NextStep>
 
+      {invoice.payments.length ? (
+        <div className="no-print" style={{ marginBottom: 18 }}>
+          <Card description="每一次收到款項的紀錄，最新的在最上面。" title="收款紀錄">
+            <ul className="payment-list">
+              {invoice.payments.map((payment) => (
+                <li className="payment-row" key={payment.id}>
+                  <span className="payment-date">{formatDate(payment.paidAt)}</span>
+                  <b className="payment-amount">{currencyAmount(currency, payment.amount)}</b>
+                  <span className="payment-note">{payment.note || "—"}</span>
+                </li>
+              ))}
+            </ul>
+          </Card>
+        </div>
+      ) : null}
+
       <div className="doc-frame print-keep">
         <p className="doc-frame-label no-print">文件內容（這就是客戶會收到的 PDF）</p>
         <InvoicePaper currency={currency} invoice={invoice} />
       </div>
+
+      <RecordPaymentDialog
+        currency={currency}
+        invoice={invoice}
+        onClose={() => setRecording(false)}
+        onRecorded={(updated) => {
+          setRecording(false);
+          setInvoice(updated);
+        }}
+        open={recording}
+      />
     </div>
   );
 }
@@ -213,11 +262,11 @@ function describeNextStep(invoice: Invoice, canManage: boolean, remaining: numbe
     case "draft":
       return "先按「下載 PDF」傳給客戶，再回來標示為已發送。標示之後內容就會鎖定。";
     case "overdue":
-      return `付款已逾期 ${Math.abs(remaining)} 天，建議聯絡客戶確認付款情況。`;
+      return `付款已逾期 ${Math.abs(remaining)} 天，建議聯絡客戶確認。收到款項後按「登記收款」。`;
     case "unpaid":
-      return `已發送，等待客戶在 ${formatDate(invoice.dueDate)} 前付款。收到款項後可到「收據」開立收據給客戶。`;
+      return `已發送，等待客戶在 ${formatDate(invoice.dueDate)} 前付款。收到款項後按「登記收款」，可以分次登記。`;
     case "partially_paid":
-      return "已收到部分款項，剩餘金額仍在追蹤中。";
+      return "已收到部分款項。收到後續款項時再按「登記收款」，全數收妥後狀態會自動變成已付款。";
     case "paid":
       return "款項已全數收到。如果客戶需要收據，可以到「收據」開立一張。";
     case "void":

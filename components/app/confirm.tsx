@@ -73,3 +73,11 @@ export function useConfirm() {
   if (!confirm) throw new Error("useConfirm 必須在 ConfirmProvider 內使用。");
   return confirm;
 }
+
+/**
+ * For shared components that also render outside a ConfirmProvider — the auth
+ * screens, for instance. Returns null instead of throwing.
+ */
+export function useOptionalConfirm() {
+  return useContext(ConfirmContext);
+}

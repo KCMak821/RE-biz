@@ -13,7 +13,25 @@ export type ReceiptTemplate = {
   showPaymentMethod: boolean;
   showSignature: boolean;
   showSeal: boolean;
+  uploadedSealOffsetX: number;
+  uploadedSealOffsetY: number;
+  uploadedSealScale: number;
 };
+
+export const uploadedSealLayout = {
+  defaultOffsetX: 24,
+  defaultOffsetY: 0,
+  defaultScale: 100,
+  maxOffsetY: 12,
+  maxScale: 160,
+  minOffsetY: -12,
+  minScale: 50,
+} as const;
+
+/** The uploaded image must stay inside the 190px signature block. */
+export function uploadedSealHorizontalLimit(scale: number) {
+  return Math.floor((190 - (94 * scale) / 100) / 2);
+}
 
 export const defaultReceiptTemplate: ReceiptTemplate = {
   accentColor: "#1e4c45",
@@ -30,6 +48,9 @@ export const defaultReceiptTemplate: ReceiptTemplate = {
   showPaymentMethod: true,
   showSignature: true,
   showSeal: false,
+  uploadedSealOffsetX: uploadedSealLayout.defaultOffsetX,
+  uploadedSealOffsetY: uploadedSealLayout.defaultOffsetY,
+  uploadedSealScale: uploadedSealLayout.defaultScale,
 };
 
 export const receiptTemplatePresets = {

@@ -5,7 +5,18 @@ import { customersCollection } from "@/lib/customer-store";
 import { getDatabase } from "@/lib/mongodb";
 import { customerFieldsSchema, type CustomerFields } from "@/lib/quotation";
 import { companySnapshot, type QuoteDocument } from "@/lib/quote-store";
-import { calculatedInvoiceLines, calculatedInvoiceTotals, type InvoiceLine, type InvoicePaymentStatus, type InvoiceStatus } from "@/lib/invoice";
+import { calculatedInvoiceLines, calculatedInvoiceTotals, invoiceEffectiveStatus, type InvoiceLine, type InvoicePaymentStatus, type InvoiceStatus } from "@/lib/invoice";
+import { sumAmounts } from "@/lib/money";
+
+/** One recorded receipt of money against an invoice. */
+export type InvoicePaymentDocument = {
+  _id: ObjectId;
+  amount: number;
+  createdAt: Date;
+  createdBy: ObjectId;
+  note: string;
+  paidAt: string;
+};
 
 export type InvoiceDocument = {
   companySnapshot: ReturnType<typeof companySnapshot>;
@@ -20,6 +31,8 @@ export type InvoiceDocument = {
   lines: InvoiceLine[];
   notes: string;
   organizationId: ObjectId;
+  /** Absent on invoices created before payment recording existed. */
+  payments?: InvoicePaymentDocument[];
   paymentStatus: InvoicePaymentStatus;
   sentAt?: Date;
   sourceQuoteId?: ObjectId;
@@ -75,6 +88,58 @@ export async function activeCustomerSnapshot(user: AppUser, customerId: string) 
     phone: customer.phone,
   });
 }
+/**
+ * The wire shape of an invoice. Shared by the list, detail and payment routes so
+ * all three report the same payment totals.
+ */
+export function serializeInvoice(document: InvoiceDocument & { _id: ObjectId }) {
+  const paidAmount = invoicePaidAmount(document);
+  return {
+    companySnapshot: document.companySnapshot,
+    createdAt: document.createdAt.toISOString(),
+    currency: document.currency,
+    customerId: document.customerId?.toHexString(),
+    customerSnapshot: document.customerSnapshot,
+    dueDate: document.dueDate,
+    effectiveStatus: invoiceEffectiveStatus(document.status, document.paymentStatus, document.dueDate),
+    id: document._id.toHexString(),
+    invoiceNumber: document.invoiceNumber,
+    issueDate: document.issueDate,
+    lines: document.lines,
+    notes: document.notes,
+    outstandingAmount: sumAmounts([document.totalAmount, -paidAmount]),
+    paidAmount,
+    payments: serializeInvoicePayments(document),
+    paymentStatus: document.paymentStatus,
+    sentAt: document.sentAt?.toISOString(),
+    sourceQuoteId: document.sourceQuoteId?.toHexString(),
+    sourceQuoteNumber: document.sourceQuoteNumber,
+    status: document.status,
+    terms: document.terms,
+    totalAmount: document.totalAmount,
+    totalDiscount: document.totalDiscount,
+    updatedAt: document.updatedAt.toISOString(),
+  };
+}
+
+/** Total money recorded against an invoice, in the stored amount representation. */
+export function invoicePaidAmount(invoice: Pick<InvoiceDocument, "payments">) {
+  return sumAmounts((invoice.payments ?? []).map((payment) => payment.amount));
+}
+
+export function serializeInvoicePayments(invoice: Pick<InvoiceDocument, "payments">) {
+  return [...(invoice.payments ?? [])]
+    // Newest instalment first, matching how the detail page reads.
+    .sort((left, right) => right.paidAt.localeCompare(left.paidAt) || right.createdAt.getTime() - left.createdAt.getTime())
+    .map((payment) => ({
+      amount: payment.amount,
+      createdAt: payment.createdAt.toISOString(),
+      id: payment._id.toHexString(),
+      note: payment.note,
+      paidAt: payment.paidAt,
+    }));
+}
+
 export function quoteInvoiceFields(quote: QuoteDocument) {
   const lines = calculatedInvoiceLines(quote.lines);
   return { companySnapshot: quote.companySnapshot, customerId: quote.customerId, customerSnapshot: quote.customerSnapshot, currency: quote.currency, lines, notes: quote.notes, terms: quote.terms, ...calculatedInvoiceTotals(lines) };

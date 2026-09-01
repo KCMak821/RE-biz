@@ -23,6 +23,7 @@ import { useWorkspace } from "@/components/app/session";
 import { Card } from "@/components/app/surfaces";
 import { notify } from "@/components/app/toast";
 import { useUnsavedChanges } from "@/components/app/dirty-guard";
+import { BatchReceiptPrint, type BatchPrintLayout } from "@/components/features/receipts/batch-receipt-print";
 import { ReceiptPaper } from "@/components/features/receipts/receipt-paper";
 import { ApiError, request } from "@/lib/api";
 import { currencyAmount, today } from "@/lib/format";
@@ -68,9 +69,11 @@ export function ReceiptCreate() {
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [created, setCreated] = useState<{ count: number; numbers: string[] } | null>(null);
   const [printQueue, setPrintQueue] = useState<ReceiptDraft[]>([]);
+  const [printQueueSource, setPrintQueueSource] = useState<Mode | null>(null);
 
   const [batchText, setBatchText] = useState("");
   const [batchError, setBatchError] = useState("");
+  const [batchPrintLayout, setBatchPrintLayout] = useState<BatchPrintLayout>("standard");
 
   const logoUrl = organizationLogoUrl(organization);
   const sealUrl = organizationSealUrl(organization);
@@ -145,6 +148,7 @@ export function ReceiptCreate() {
     setDraft(numbered);
     setCreated({ count: result.count, numbers: result.numbers });
     setPrintQueue([numbered]);
+    setPrintQueueSource("single");
     notify.success(`收據 ${result.numbers[0]} 已建立`, "接下來會開啟列印視窗，選擇「另存為 PDF」即可下載。");
     window.setTimeout(() => window.print(), 150);
   }
@@ -167,7 +171,14 @@ export function ReceiptCreate() {
     }));
     setCreated({ count: result.count, numbers: result.numbers });
     setPrintQueue(numbered);
-    notify.success(`已建立 ${result.count} 張收據`, "接下來會開啟列印視窗，每張收據各自一頁。");
+    setPrintQueueSource("batch");
+    const a4Pages = batchPrintLayout === "paper-saving" ? Math.ceil(result.count / 2) : result.count;
+    notify.success(
+      `已建立 ${result.count} 張收據`,
+      batchPrintLayout === "paper-saving"
+        ? `接下來會開啟列印視窗，預計使用 ${a4Pages} 張 A4。`
+        : "接下來會開啟列印視窗，每張收據各自一頁。",
+    );
     window.setTimeout(() => window.print(), 150);
   }
 
@@ -222,7 +233,10 @@ export function ReceiptCreate() {
     setFormError("");
     setCreated(null);
     setPrintQueue([]);
+    setPrintQueueSource(null);
   }
+
+  const previewBatch = useMemo(() => parseBatchReceipts(batchText, draft, TODAY), [batchText, draft]);
 
   if (blocked) {
     return (
@@ -269,6 +283,8 @@ export function ReceiptCreate() {
 
   const paymentSelectValue = paymentMethodSelectValue(draft.paymentMethod);
   const rowCount = batchRowCount(batchText);
+  const batchReceiptCount = printQueueSource === "batch" && created ? printQueue.length : rowCount;
+  const batchA4Pages = batchPrintLayout === "paper-saving" ? Math.ceil(batchReceiptCount / 2) : batchReceiptCount;
 
   return (
     <div className="page page-wide">
@@ -637,12 +653,37 @@ export function ReceiptCreate() {
             />
           ) : (
             <div className="builder-scale">
+              <label className="receipt-layout-select" htmlFor="batch-print-layout">
+                <span>列印版型</span>
+                <select
+                  id="batch-print-layout"
+                  onChange={(event) => setBatchPrintLayout(event.target.value as BatchPrintLayout)}
+                  value={batchPrintLayout}
+                >
+                  <option value="standard">標準版：每頁 1 張 A4 收據</option>
+                  <option value="paper-saving">節省紙張版：每頁 2 張收據</option>
+                </select>
+              </label>
               <p className="field-hint" style={{ fontSize: 13 }}>
-                系統會把上方的共用收款方資料套到每一張收據，為每張自動派號，並在列印時各自分頁。
+                {batchPrintLayout === "paper-saving"
+                  ? "每張 A4 直式紙會上下排列兩張橫向收據，中央標示裁切線。"
+                  : "每張收據各自使用一張 A4，沿用既有的單張版型。"}
               </p>
               <p className="lines-total" style={{ marginTop: 12 }}>
-                <strong>{rowCount || 0}</strong> 筆待建立
+                <strong>{batchReceiptCount}</strong> 張收據
+                <span>預估使用 <strong>{batchA4Pages}</strong> 張 A4</span>
               </p>
+              {batchPrintLayout === "paper-saving" && previewBatch.receipts.length ? (
+                <BatchReceiptPrint
+                  currency={currency}
+                  layout="paper-saving"
+                  logoUrl={logoUrl}
+                  preview
+                  receipts={previewBatch.receipts.slice(0, 2)}
+                  sealUrl={sealUrl}
+                  template={organization.receiptTemplate}
+                />
+              ) : null}
             </div>
           )}
           <p className="legal-note">
@@ -652,16 +693,27 @@ export function ReceiptCreate() {
       </div>
 
       <div className="print-only">
-        {printQueue.map((receipt, index) => (
-          <ReceiptPaper
+        {printQueueSource === "batch" ? (
+          <BatchReceiptPrint
             currency={currency}
-            key={`${receipt.receiptNumber}-${index}`}
+            layout={batchPrintLayout}
             logoUrl={logoUrl}
-            receipt={receipt}
+            receipts={printQueue}
             sealUrl={sealUrl}
             template={organization.receiptTemplate}
           />
-        ))}
+        ) : (
+          printQueue.map((receipt, index) => (
+            <ReceiptPaper
+              currency={currency}
+              key={`${receipt.receiptNumber}-${index}`}
+              logoUrl={logoUrl}
+              receipt={receipt}
+              sealUrl={sealUrl}
+              template={organization.receiptTemplate}
+            />
+          ))
+        )}
       </div>
     </div>
   );

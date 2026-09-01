@@ -19,7 +19,13 @@ import { request } from "@/lib/api";
 import { help } from "@/lib/help-content";
 import { organizationLogoUrl, organizationSealUrl } from "@/lib/organization-assets";
 import { newReceiptDraft } from "@/lib/receipt-form";
-import { defaultReceiptTemplate, receiptTemplatePresets, type ReceiptTemplate } from "@/lib/receipt-template";
+import {
+  defaultReceiptTemplate,
+  receiptTemplatePresets,
+  uploadedSealHorizontalLimit,
+  uploadedSealLayout,
+  type ReceiptTemplate,
+} from "@/lib/receipt-template";
 
 const presetLabels: Record<ReceiptTemplate["preset"], { description: string; label: string }> = {
   classic: { description: "深綠標題列，適合大部分商號", label: "經典" },
@@ -56,6 +62,7 @@ export function ReceiptTemplateForm() {
 
   const logoUrl = organizationLogoUrl(organization);
   const sealUrl = organizationSealUrl({ ...organization, hasSealImage: hasSeal, sealUpdatedAt: sealVersion });
+  const sealHorizontalLimit = uploadedSealHorizontalLimit(template.uploadedSealScale);
 
   const previewReceipt = {
     ...newReceiptDraft("2026-08-30", {
@@ -73,6 +80,27 @@ export function ReceiptTemplateForm() {
   function update<Key extends keyof ReceiptTemplate>(key: Key, value: ReceiptTemplate[Key]) {
     setMessage("");
     setTemplate((current) => ({ ...current, [key]: value }));
+  }
+
+  function updateUploadedSealScale(nextScale: number) {
+    setMessage("");
+    setTemplate((current) => {
+      const horizontalLimit = uploadedSealHorizontalLimit(nextScale);
+      return {
+        ...current,
+        uploadedSealOffsetX: Math.max(-horizontalLimit, Math.min(horizontalLimit, current.uploadedSealOffsetX)),
+        uploadedSealScale: nextScale,
+      };
+    });
+  }
+
+  function resetUploadedSealPosition() {
+    setMessage("");
+    setTemplate((current) => ({
+      ...current,
+      uploadedSealOffsetX: Math.min(uploadedSealLayout.defaultOffsetX, uploadedSealHorizontalLimit(current.uploadedSealScale)),
+      uploadedSealOffsetY: uploadedSealLayout.defaultOffsetY,
+    }));
   }
 
   async function save() {
@@ -187,8 +215,8 @@ export function ReceiptTemplateForm() {
                 value={template.receiptTitle}
               />
               <div className="field">
-                <span className="field-label">
-                  <span>主色</span>
+                <span className="field-label-row">
+                  <span className="field-label">主色</span>
                 </span>
                 <div className="color-row">
                   <input
@@ -311,6 +339,60 @@ export function ReceiptTemplateForm() {
                 <small>支援 PNG、JPG、WebP。建議使用透明背景，檔案小於 2 MB。</small>
               </div>
             )}
+
+            {template.showSeal && template.sealSource === "uploaded" && hasSeal ? (
+              <section className="seal-layout-adjustment" aria-labelledby="seal-layout-title">
+                <div>
+                  <h3 id="seal-layout-title">印章版面調整</h3>
+                  <p>調整圖片在收據簽署區的位置與大小，變更會即時顯示於右側預覽。</p>
+                </div>
+                <label className="seal-layout-control">
+                  <span>
+                    印章大小 <output>{template.uploadedSealScale}%</output>
+                  </span>
+                  <input
+                    aria-valuetext={`${template.uploadedSealScale}%`}
+                    max={uploadedSealLayout.maxScale}
+                    min={uploadedSealLayout.minScale}
+                    onChange={(event) => updateUploadedSealScale(Number(event.target.value))}
+                    step="1"
+                    type="range"
+                    value={template.uploadedSealScale}
+                  />
+                </label>
+                <label className="seal-layout-control">
+                  <span>
+                    水平位置 <output>{formatHorizontalOffset(template.uploadedSealOffsetX)}</output>
+                  </span>
+                  <input
+                    aria-valuetext={formatHorizontalOffset(template.uploadedSealOffsetX)}
+                    max={sealHorizontalLimit}
+                    min={-sealHorizontalLimit}
+                    onChange={(event) => update("uploadedSealOffsetX", Number(event.target.value))}
+                    step="1"
+                    type="range"
+                    value={template.uploadedSealOffsetX}
+                  />
+                </label>
+                <label className="seal-layout-control">
+                  <span>
+                    垂直位置 <output>{formatVerticalOffset(template.uploadedSealOffsetY)}</output>
+                  </span>
+                  <input
+                    aria-valuetext={formatVerticalOffset(template.uploadedSealOffsetY)}
+                    max={uploadedSealLayout.maxOffsetY}
+                    min={uploadedSealLayout.minOffsetY}
+                    onChange={(event) => update("uploadedSealOffsetY", Number(event.target.value))}
+                    step="1"
+                    type="range"
+                    value={template.uploadedSealOffsetY}
+                  />
+                </label>
+                <Button onClick={resetUploadedSealPosition} size="sm" variant="secondary">
+                  還原預設位置
+                </Button>
+              </section>
+            ) : null}
           </FormSection>
 
           <FormError>{message}</FormError>
@@ -340,4 +422,14 @@ export function ReceiptTemplateForm() {
       </div>
     </div>
   );
+}
+
+function formatHorizontalOffset(value: number) {
+  if (value === 0) return "置中 0";
+  return value > 0 ? `向右 ${value}` : `向左 ${Math.abs(value)}`;
+}
+
+function formatVerticalOffset(value: number) {
+  if (value === 0) return "不位移 0";
+  return value > 0 ? `向下 ${value}` : `向上 ${Math.abs(value)}`;
 }

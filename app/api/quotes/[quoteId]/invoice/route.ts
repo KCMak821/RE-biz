@@ -23,7 +23,7 @@ export async function POST(_: Request, { params }: { params: Promise<{ quoteId: 
     const invoices = await invoicesCollection(); const existing = await invoices.findOne({ sourceQuoteId: id, organizationId });
     if (existing) return Response.json({ message: "此報價單已建立請款單。", invoice: { id: existing._id.toHexString(), invoiceNumber: existing.invoiceNumber } }, { status: 409 });
     const now = new Date(); const fields = quoteInvoiceFields(quote);
-    const invoice: InvoiceDocument = { ...fields, createdAt: now, createdBy, dueDate: quote.validUntil, invoiceNumber: await nextInvoiceNumber(organizationId, now.toISOString().slice(0, 10)), issueDate: now.toISOString().slice(0, 10), organizationId, paymentStatus: "unpaid", sourceQuoteId: id, sourceQuoteNumber: quote.quoteNumber, status: "draft", updatedAt: now };
+    const invoice: InvoiceDocument = { ...fields, createdAt: now, createdBy, dueDate: quote.validUntil, invoiceNumber: await nextInvoiceNumber(organizationId, now.toISOString().slice(0, 10)), issueDate: now.toISOString().slice(0, 10), organizationId, payments: [], paymentStatus: "unpaid", sourceQuoteId: id, sourceQuoteNumber: quote.quoteNumber, status: "draft", updatedAt: now };
     try {
       const result = await invoices.insertOne(invoice);
       await (await quotesCollection()).updateOne({ _id: id, organizationId, createdBy }, { $set: { invoiceId: result.insertedId, updatedAt: now } });

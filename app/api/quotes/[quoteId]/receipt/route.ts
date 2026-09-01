@@ -30,7 +30,7 @@ export async function POST(_: Request, { params }: { params: Promise<{ quoteId: 
       issuerContact: [quote.companySnapshot.phone, quote.companySnapshot.email].filter(Boolean).join(" · "), issuerName: quote.companySnapshot.name,
       lineItems: quote.lines, notes: [quote.notes, `來源報價單：${quote.quoteNumber}`].filter(Boolean).join("\n"), organizationId,
       payerAddress: quote.customerSnapshot.address, payerName: quote.customerSnapshot.name, paymentMethod: "待收款", paymentStatus: "pending",
-      receiptNumber, sourceQuoteId: id, sourceQuoteNumber: quote.quoteNumber, updatedAt: now,
+      receiptNumber, receiptTemplateSnapshot: { ...user.organization.receiptTemplate }, sourceQuoteId: id, sourceQuoteNumber: quote.quoteNumber, updatedAt: now,
     };
     try {
       const result = await receipts.insertOne(receipt);

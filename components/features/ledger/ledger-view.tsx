@@ -1,7 +1,7 @@
 "use client";
 
 import { ArrowDownRight, ArrowUpRight, BookOpenText, Plus } from "lucide-react";
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useState, type FormEvent } from "react";
 
 import { Button } from "@/components/app/button";
 import { DataTable, ListCard, type Column } from "@/components/app/data-table";
@@ -11,36 +11,44 @@ import { SkeletonRows } from "@/components/app/feedback";
 import { Field, FormError, FormGrid, FormSection, SelectField } from "@/components/app/form";
 import { ListToolbar, ToolbarSelect } from "@/components/app/list-toolbar";
 import { PageHeader } from "@/components/app/page-header";
+import { Pagination } from "@/components/app/pagination";
 import { useWorkspace } from "@/components/app/session";
 import { Stat, Stats } from "@/components/app/surfaces";
 import { Tag } from "@/components/app/status-badge";
 import { notify } from "@/components/app/toast";
+import { useListQuery } from "@/components/app/use-list-query";
 import { ApiError, request } from "@/lib/api";
 import { currencyAmount, formatDate, today } from "@/lib/format";
 import { help } from "@/lib/help-content";
 import type { LedgerEntry, LedgerSummary } from "@/types/records";
 
 const TODAY = today();
-const LEDGER_PAGE_SIZE = 100;
+const filterDefaults = { type: "all" };
 
 export function LedgerView() {
   const { canManageRecords, currency } = useWorkspace();
+  const query = useListQuery({ basePath: "/ledger", filterDefaults });
   const [entries, setEntries] = useState<LedgerEntry[]>([]);
   const [summary, setSummary] = useState<LedgerSummary>({ balance: 0, expense: 0, income: 0 });
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(true);
   const [blocked, setBlocked] = useState<string | null>(null);
   const [version, setVersion] = useState(0);
-  const [keyword, setKeyword] = useState("");
-  const [typeFilter, setTypeFilter] = useState("all");
   const [composing, setComposing] = useState(false);
+  const { apiQuery, page } = query;
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
       setLoading(true);
-      void request<{ entries?: LedgerEntry[]; summary?: LedgerSummary }>("/api/ledger")
+      void request<{ entries?: LedgerEntry[]; summary?: LedgerSummary; total?: number; totalPages?: number }>(
+        `/api/ledger?${apiQuery}`,
+      )
         .then((data) => {
           setEntries(data.entries ?? []);
           setSummary(data.summary ?? { balance: 0, expense: 0, income: 0 });
+          setTotal(data.total ?? 0);
+          setTotalPages(data.totalPages ?? 1);
           setBlocked(null);
         })
         .catch((error: unknown) => {
@@ -50,16 +58,9 @@ export function LedgerView() {
         .finally(() => setLoading(false));
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [version]);
+  }, [apiQuery, version]);
 
-  const filtered = useMemo(() => {
-    const search = keyword.trim().toLowerCase();
-    return entries.filter((entry) => {
-      if (typeFilter !== "all" && entry.type !== typeFilter) return false;
-      if (!search) return true;
-      return entry.description.toLowerCase().includes(search);
-    });
-  }, [entries, keyword, typeFilter]);
+  const reload = useCallback(() => setVersion((current) => current + 1), []);
 
   const columns: Column<LedgerEntry>[] = [
     {
@@ -157,52 +158,40 @@ export function LedgerView() {
               filters={
                 <ToolbarSelect
                   label="類型"
-                  onChange={setTypeFilter}
+                  onChange={(value) => query.setFilter("type", value)}
                   options={[
                     { label: "全部", value: "all" },
                     { label: "只看收入", value: "IN" },
                     { label: "只看支出", value: "OUT" },
                   ]}
-                  value={typeFilter}
+                  value={query.filters.type}
                 />
               }
-              onReset={
-                keyword || typeFilter !== "all"
-                  ? () => {
-                      setKeyword("");
-                      setTypeFilter("all");
-                    }
-                  : undefined
-              }
-              onSearchChange={setKeyword}
-              resultLabel={loading ? "載入中…" : `顯示 ${filtered.length} 筆，列表保留最近 ${LEDGER_PAGE_SIZE} 筆`}
-              searchPlaceholder="搜尋說明文字"
-              searchValue={keyword}
+              onReset={query.isFiltered ? query.clear : undefined}
+              onSearchChange={query.setDraftKeyword}
+              resultLabel={loading ? "載入中…" : `共 ${total} 筆紀錄`}
+              searchPlaceholder="搜尋說明、收據編號或付款人"
+              searchValue={query.draftKeyword}
             />
 
             <ListCard
               footer={
                 entries.length
-                  ? "上方的累計數字包含全部紀錄；列表只顯示最近 100 筆。標示「由收據自動帶入」的紀錄請回到「收據」頁處理。"
+                  ? "上方的累計數字包含全部紀錄。標示「由收據自動帶入」的紀錄請回到「收據」頁處理。"
                   : undefined
               }
             >
               {loading ? (
                 <SkeletonRows label="正在載入收支紀錄" rows={6} />
-              ) : filtered.length ? (
+              ) : entries.length ? (
                 <DataTable
                   ariaLabel="收支紀錄"
                   columns={columns}
                   rowKey={(entry) => entry.id}
-                  rows={filtered}
+                  rows={entries}
                 />
-              ) : entries.length ? (
-                <NoResults
-                  onReset={() => {
-                    setKeyword("");
-                    setTypeFilter("all");
-                  }}
-                />
+              ) : query.isFiltered ? (
+                <NoResults onReset={query.clear} />
               ) : (
                 <EmptyState
                   actions={
@@ -224,6 +213,8 @@ export function LedgerView() {
                 </EmptyState>
               )}
             </ListCard>
+
+            <Pagination disabled={loading} onPageChange={query.setPage} page={page} totalPages={totalPages} />
           </div>
         </>
       )}
@@ -233,7 +224,7 @@ export function LedgerView() {
         onClose={() => setComposing(false)}
         onSaved={() => {
           setComposing(false);
-          setVersion((current) => current + 1);
+          reload();
         }}
         open={composing}
       />

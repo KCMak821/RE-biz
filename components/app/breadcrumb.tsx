@@ -1,5 +1,8 @@
+"use client";
+
 import { ChevronRight } from "lucide-react";
-import Link from "next/link";
+
+import { GuardedLink } from "@/components/app/guarded-link";
 
 export type Crumb = { href?: string; label: string };
 
@@ -17,7 +20,7 @@ export function Breadcrumb({ items }: { items: Crumb[] }) {
           return (
             <li key={`${item.label}-${index}`}>
               {item.href && !isLast ? (
-                <Link href={item.href}>{item.label}</Link>
+                <GuardedLink href={item.href}>{item.label}</GuardedLink>
               ) : (
                 <span aria-current={isLast ? "page" : undefined}>{item.label}</span>
               )}

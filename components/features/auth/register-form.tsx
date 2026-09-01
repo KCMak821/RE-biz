@@ -174,8 +174,8 @@ export function RegisterForm() {
               value={companyName}
             />
             <div className="field">
-              <span className="field-label">
-                <span>公司 Logo</span>
+              <span className="field-label-row">
+                <span className="field-label">公司 Logo</span>
                 <em className="field-optional">選填</em>
               </span>
               <div className="logo-picker">

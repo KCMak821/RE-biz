@@ -2,10 +2,11 @@
 
 import { LogOut, Menu, X } from "lucide-react";
 import Image from "next/image";
-import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
+import { useGuardedNavigation } from "@/components/app/dirty-guard";
+import { GuardedLink } from "@/components/app/guarded-link";
 import { NavLink } from "@/components/app/nav-link";
 import { navItemFor, visibleNavigation } from "@/components/app/navigation";
 import { useWorkspace } from "@/components/app/session";
@@ -18,13 +19,14 @@ import { roleLabel } from "@/lib/status";
  * gets a drawer plus the name of the page you are on.
  */
 export function AppShell({ children }: { children: ReactNode }) {
-  const { canManageSettings, isSuperAdmin, organization, role, user } = useWorkspace();
+  const { canManageSettings, features, isSuperAdmin, organization, role, user } = useWorkspace();
   const pathname = usePathname();
   const router = useRouter();
+  const { confirmDiscard } = useGuardedNavigation();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const drawer = useRef<HTMLDialogElement>(null);
-  const groups = visibleNavigation({ canManageSettings, isSuperAdmin });
+  const groups = visibleNavigation({ canManageSettings, features, isSuperAdmin });
   const current = navItemFor(pathname);
 
   useEffect(() => {
@@ -46,6 +48,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   }, []);
 
   async function signOut() {
+    // Signing out mid-edit throws work away just as surely as navigating away.
+    if (!(await confirmDiscard())) return;
     setSigningOut(true);
     await fetch("/api/auth/logout", { method: "POST" });
     router.replace("/login");
@@ -80,10 +84,10 @@ export function AppShell({ children }: { children: ReactNode }) {
         >
           <Menu aria-hidden="true" size={19} />
         </button>
-        <Link className="brand" href="/dashboard">
+        <GuardedLink className="brand" href="/dashboard">
           <Image alt="" className="brand-mark" height={30} priority src="/re-biz-mark.svg" width={30} />
           <span className="brand-name">RE-Biz</span>
-        </Link>
+        </GuardedLink>
         <span className="shell-current">{current?.label ?? ""}</span>
         <div className="shell-identity">
           <span className="shell-org" title="目前公司">

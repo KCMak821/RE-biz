@@ -1,6 +1,7 @@
 import { ObjectId } from "mongodb";
 
 import type { ReceiptCreateInput, ReceiptInput } from "@/lib/receipt";
+import type { ReceiptTemplate } from "@/lib/receipt-template";
 import { getDatabase } from "@/lib/mongodb";
 
 export type ReceiptLineSnapshot = {
@@ -20,12 +21,42 @@ export type ReceiptDocument = ReceiptInput & {
   lineItems?: ReceiptLineSnapshot[];
   organizationId: ObjectId;
   paymentStatus: ReceiptPaymentStatus;
+  /** The visual contract at the time the receipt was issued. */
+  receiptTemplateSnapshot?: ReceiptTemplate;
   sourceQuoteId?: ObjectId;
   sourceQuoteNumber?: string;
   updatedAt: Date;
 };
 
 type ReceiptCounter = { createdAt: Date; dateKey: string; organizationId: ObjectId; sequence: number; updatedAt: Date };
+
+/**
+ * The wire shape of a receipt. Shared by the list and the detail route so both
+ * return exactly the same fields.
+ */
+export function serializeReceipt(document: ReceiptDocument & { _id: ObjectId }) {
+  return {
+    amount: document.amount,
+    businessRegistration: document.businessRegistration,
+    createdAt: document.createdAt.toISOString(),
+    description: document.description,
+    id: document._id.toHexString(),
+    issueDate: document.issueDate,
+    issuerAddress: document.issuerAddress,
+    issuerContact: document.issuerContact,
+    issuerName: document.issuerName,
+    lineItems: document.lineItems,
+    notes: document.notes,
+    payerAddress: document.payerAddress,
+    payerName: document.payerName,
+    paymentMethod: document.paymentMethod,
+    paymentStatus: document.paymentStatus,
+    receiptNumber: document.receiptNumber,
+    receiptTemplateSnapshot: document.receiptTemplateSnapshot,
+    sourceQuoteId: document.sourceQuoteId?.toHexString(),
+    sourceQuoteNumber: document.sourceQuoteNumber,
+  };
+}
 
 export async function receiptsCollection() {
   const collection = (await getDatabase()).collection<ReceiptDocument>("receipts");
@@ -89,6 +120,7 @@ export async function createReceiptDocuments(input: {
   createdBy: ObjectId;
   organizationId: ObjectId;
   receipts: ReceiptCreateInput[];
+  receiptTemplate: ReceiptTemplate;
 }) {
   const now = new Date();
   const receiptNumbers = await nextReceiptNumbers(input.organizationId, input.receipts);
@@ -99,6 +131,7 @@ export async function createReceiptDocuments(input: {
     createdBy: input.createdBy,
     organizationId: input.organizationId,
     paymentStatus: "paid",
+    receiptTemplateSnapshot: { ...input.receiptTemplate },
     updatedAt: now,
   }));
   const result = await (await receiptsCollection()).insertMany(documents);

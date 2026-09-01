@@ -1,14 +1,13 @@
 import { ObjectId } from "mongodb";
 
 import { canManageRecords, getCurrentUser } from "@/lib/auth";
-import { itemsCollection, type ItemDocument } from "@/app/api/items/route";
+import { itemsCollection, serializeItem } from "@/lib/item-store";
 import { itemFieldsSchema } from "@/lib/quotation";
 import { canUseWorkspaceFeature } from "@/lib/platform-admin";
 
 export const runtime = "nodejs";
 
 async function context(params: Promise<{ itemId: string }>) { const { itemId } = await params; return ObjectId.isValid(itemId) ? new ObjectId(itemId) : null; }
-function serialize(document: ItemDocument & { _id: ObjectId }) { return { ...document, createdAt: document.createdAt.toISOString(), id: document._id.toHexString(), updatedAt: document.updatedAt.toISOString(), _id: undefined, createdBy: undefined, organizationId: undefined }; }
 
 export async function PUT(request: Request, { params }: { params: Promise<{ itemId: string }> }) {
   const id = await context(params); const parsed = itemFieldsSchema.safeParse(await request.json().catch(() => null));
@@ -18,7 +17,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ item
     if (!canManageRecords(user)) return Response.json({ message: "你的角色只有檢視權限，無法更新品項。" }, { status: 403 });
     if (!await canUseWorkspaceFeature(user, "quotations")) return Response.json({ message: "此工作區目前無法使用報價單功能。" }, { status: 403 });
     const result = await (await itemsCollection()).findOneAndUpdate({ _id: id, organizationId: new ObjectId(user.organization.id), createdBy: new ObjectId(user.id) }, { $set: { ...parsed.data, updatedAt: new Date() } }, { returnDocument: "after" });
-    return result ? Response.json({ item: serialize(result) }) : Response.json({ message: "品項不存在。" }, { status: 404 });
+    return result ? Response.json({ item: serializeItem(result) }) : Response.json({ message: "品項不存在。" }, { status: 404 });
   } catch { return Response.json({ message: "無法更新品項。" }, { status: 503 }); }
 }
 
