@@ -257,8 +257,8 @@ function isTooLongForMiniReceipt(receipt: ReceiptDraft, particulars: string) {
 function miniSignatureStyle(template: ReceiptTemplate) {
   const safeTemplate = normalizeUploadedSealLayout(template);
   return {
-    "--mini-signature-offset-x": `${(safeTemplate.uploadedSealOffsetX * 96) / 190}px`,
-    "--mini-signature-offset-y": `${(safeTemplate.uploadedSealOffsetY * 28) / 64}px`,
+    "--mini-signature-offset-x": `${(safeTemplate.uploadedSealOffsetX * 121) / 190}px`,
+    "--mini-signature-offset-y": `${(safeTemplate.uploadedSealOffsetY * 34) / 64}px`,
     "--mini-signature-scale": `${safeTemplate.uploadedSealScale}%`,
   };
 }
