@@ -3,42 +3,139 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-import { featureLabel } from "@/components/admin/presentation";
+import { Button } from "@/components/app/button";
+import { useConfirm } from "@/components/app/confirm";
+import { StatusBadge } from "@/components/app/status-badge";
+import { notify } from "@/components/app/toast";
+import { request } from "@/lib/api";
+import { featureLabel } from "@/lib/status";
 
 type Feature = { enabled: boolean; featureKey: "receipts" | "accounting" | "quotations" | "invoices" };
 
-export function WorkspaceControls({ features, status, workspaceId }: { features: Feature[]; status: "active" | "suspended"; workspaceId: string }) {
+const featureConsequences: Record<Feature["featureKey"], string> = {
+  accounting: "成員將無法查看或新增收支紀錄，餘額也不會再顯示。",
+  invoices: "成員將無法查看、建立或發送請款單。",
+  quotations: "成員將無法查看或建立報價單、客戶與商品資料。",
+  receipts: "成員將無法開立新收據，也看不到既有收據。",
+};
+
+export function WorkspaceControls({
+  features,
+  status,
+  workspaceId,
+  workspaceName,
+}: {
+  features: Feature[];
+  status: "active" | "suspended";
+  workspaceId: string;
+  workspaceName: string;
+}) {
   const router = useRouter();
-  const [message, setMessage] = useState("");
+  const confirm = useConfirm();
   const [pending, setPending] = useState<string | null>(null);
 
   async function updateStatus() {
-    const nextStatus = status === "active" ? "suspended" : "active";
-    if (nextStatus === "suspended" && !window.confirm("確定要停用此 Workspace？\n停用後所有成員無法修改此 Workspace 的資料；既有資料會保留，可稍後重新啟用。")) return;
-    setPending("status"); setMessage("");
-    const response = await fetch(`/api/admin/workspaces/${workspaceId}`, { body: JSON.stringify({ status: nextStatus }), headers: { "content-type": "application/json" }, method: "PATCH" });
-    const data = await response.json().catch(() => ({}));
-    setPending(null);
-    if (!response.ok) { setMessage(data.message ?? "無法更新 Workspace 狀態。"); return; }
-    setMessage(nextStatus === "suspended" ? "Workspace 已停用。" : "Workspace 已重新啟用。");
-    router.refresh();
+    const suspending = status === "active";
+    if (suspending) {
+      const proceed = await confirm({
+        confirmLabel: "暫停工作區",
+        consequence: `暫停後，${workspaceName} 的所有成員登入時只會看到「工作區已暫停」的說明，無法查看或修改任何資料。所有資料完整保留，之後可以隨時重新啟用。`,
+        danger: true,
+        title: `要暫停 ${workspaceName} 嗎？`,
+      });
+      if (!proceed) return;
+    }
+
+    setPending("status");
+    try {
+      await request(`/api/admin/workspaces/${workspaceId}`, {
+        body: JSON.stringify({ status: suspending ? "suspended" : "active" }),
+        method: "PATCH",
+      });
+      notify.success(suspending ? `${workspaceName} 已暫停` : `${workspaceName} 已重新啟用`);
+      router.refresh();
+    } catch (error) {
+      notify.error("無法更新工作區狀態", error instanceof Error ? error.message : undefined);
+    } finally {
+      setPending(null);
+    }
   }
 
   async function updateFeature(feature: Feature) {
-    if (feature.enabled && !window.confirm(`確定要停用「${featureLabel(feature.featureKey)}」功能？\n停用後此 Workspace 的所有成員將無法使用對應功能與 API；資料會保留，之後可重新啟用。`)) return;
-    setPending(feature.featureKey); setMessage("");
-    const response = await fetch(`/api/admin/workspaces/${workspaceId}/features/${feature.featureKey}`, { body: JSON.stringify({ enabled: !feature.enabled }), headers: { "content-type": "application/json" }, method: "PATCH" });
-    const data = await response.json().catch(() => ({}));
-    setPending(null);
-    if (!response.ok) { setMessage(data.message ?? "無法更新功能開關。"); return; }
-    setMessage(`${featureLabel(feature.featureKey)}已${feature.enabled ? "停用" : "啟用"}。`);
-    router.refresh();
+    if (feature.enabled) {
+      const proceed = await confirm({
+        confirmLabel: `關閉${featureLabel(feature.featureKey)}`,
+        consequence: `${featureConsequences[feature.featureKey]}相關 API 也會在伺服器端拒絕存取。既有資料完整保留，之後可以重新開放。`,
+        danger: true,
+        title: `要關閉「${featureLabel(feature.featureKey)}」嗎？`,
+      });
+      if (!proceed) return;
+    }
+
+    setPending(feature.featureKey);
+    try {
+      await request(`/api/admin/workspaces/${workspaceId}/features/${feature.featureKey}`, {
+        body: JSON.stringify({ enabled: !feature.enabled }),
+        method: "PATCH",
+      });
+      notify.success(
+        `${featureLabel(feature.featureKey)}已${feature.enabled ? "關閉" : "開放"}`,
+        feature.enabled ? "成員現在無法使用這個功能。" : "成員重新整理後就可以使用。",
+      );
+      router.refresh();
+    } catch (error) {
+      notify.error("無法更新功能開關", error instanceof Error ? error.message : undefined);
+    } finally {
+      setPending(null);
+    }
   }
 
-  return <section className="admin-controls" aria-label="Workspace 管理操作">
-    <div className="admin-control-heading"><div><p>管理操作</p><h2>Workspace 狀態</h2></div><button className={status === "active" ? "admin-danger-button" : "admin-button"} disabled={pending === "status"} type="button" onClick={() => void updateStatus()}>{pending === "status" ? "處理中…" : status === "active" ? "停用 Workspace" : "重新啟用 Workspace"}</button></div>
-    <div className="admin-control-heading"><div><p>功能開關</p><h2>Workspace 可用功能</h2><span>功能關閉後，對應 API 會在伺服器端拒絕存取。</span></div></div>
-    <div className="admin-feature-list">{features.map((feature) => <div key={feature.featureKey}><div><strong>{featureLabel(feature.featureKey)}</strong><span>{feature.enabled ? "已啟用" : "已停用"}</span></div><button disabled={pending === feature.featureKey} type="button" onClick={() => void updateFeature(feature)}>{pending === feature.featureKey ? "處理中…" : feature.enabled ? "停用" : "啟用"}</button></div>)}</div>
-    {message && <p className="admin-action-message" role="status">{message}</p>}
-  </section>;
+  return (
+    <>
+      <div className="admin-feature-row" style={{ marginBottom: 18 }}>
+        <div>
+          <strong>工作區狀態</strong>
+          <span>
+            {status === "active"
+              ? "成員可以正常使用這個工作區。"
+              : "成員目前無法查看或修改任何資料，資料都已保留。"}
+          </span>
+        </div>
+        <StatusBadge domain="workspace" value={status} />
+        <Button
+          onClick={() => void updateStatus()}
+          pending={pending === "status"}
+          pendingLabel="處理中…"
+          size="sm"
+          variant={status === "active" ? "danger" : "primary"}
+        >
+          {status === "active" ? "暫停工作區" : "重新啟用工作區"}
+        </Button>
+      </div>
+
+      <h3 className="card-title" style={{ fontSize: 16, marginBottom: 10 }}>
+        可用功能
+      </h3>
+      <div className="admin-feature-list">
+        {features.map((feature) => (
+          <div className="admin-feature-row" key={feature.featureKey}>
+            <div>
+              <strong>{featureLabel(feature.featureKey)}</strong>
+              <span>{feature.enabled ? "成員可以正常使用。" : featureConsequences[feature.featureKey]}</span>
+            </div>
+            <StatusBadge domain="feature" value={feature.enabled ? "enabled" : "disabled"} />
+            <Button
+              onClick={() => void updateFeature(feature)}
+              pending={pending === feature.featureKey}
+              pendingLabel="處理中…"
+              size="sm"
+              variant={feature.enabled ? "secondary" : "primary"}
+            >
+              {feature.enabled ? "關閉功能" : "重新開放"}
+            </Button>
+          </div>
+        ))}
+      </div>
+    </>
+  );
 }

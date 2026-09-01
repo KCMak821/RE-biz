@@ -1,0 +1,14 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "overused-font",
+        "value": "arial",
+        "createdAt": "2026-09-01T08:31:24.251Z",
+        "reason": "Pre-existing font stack kept on purpose: the brief said 不要大幅更換品牌視覺 / 盡量延續現有 Design System, and the UI is almost entirely Traditional Chinese rendered by Noto Sans TC / PingFang TC — Arial is only the Latin fallback, not a chosen display face."
+      }
+    ]
+  }
+}

@@ -3,21 +3,60 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-export function UserStatusButton({ currentStatus, userId }: { currentStatus: "active" | "disabled"; userId: string }) {
+import { Button } from "@/components/app/button";
+import { useConfirm } from "@/components/app/confirm";
+import { notify } from "@/components/app/toast";
+import { request } from "@/lib/api";
+
+export function UserStatusButton({
+  currentStatus,
+  userId,
+  userName,
+}: {
+  currentStatus: "active" | "disabled";
+  userId: string;
+  userName: string;
+}) {
   const router = useRouter();
-  const [message, setMessage] = useState("");
+  const confirm = useConfirm();
   const [pending, setPending] = useState(false);
-  const nextStatus = currentStatus === "active" ? "disabled" : "active";
+  const disabling = currentStatus === "active";
 
   async function updateStatus() {
-    if (nextStatus === "disabled" && !window.confirm("確定要停用此使用者帳號？\n停用後該使用者無法登入；既有 Workspace 資料與平台紀錄不會被刪除。")) return;
-    setPending(true); setMessage("");
-    const response = await fetch(`/api/admin/users/${userId}/status`, { body: JSON.stringify({ status: nextStatus }), headers: { "content-type": "application/json" }, method: "PATCH" });
-    const data = await response.json().catch(() => ({}));
-    setPending(false);
-    if (!response.ok) { setMessage(data.message ?? "無法更新帳號狀態。"); return; }
-    router.refresh();
+    if (disabling) {
+      const proceed = await confirm({
+        confirmLabel: "停用帳號",
+        consequence: `停用後，${userName} 無法登入 RE-Biz。他在各工作區的資料、文件與平台操作紀錄都會保留，之後可以隨時重新啟用。`,
+        danger: true,
+        title: `要停用 ${userName} 的帳號嗎？`,
+      });
+      if (!proceed) return;
+    }
+
+    setPending(true);
+    try {
+      await request(`/api/admin/users/${userId}/status`, {
+        body: JSON.stringify({ status: disabling ? "disabled" : "active" }),
+        method: "PATCH",
+      });
+      notify.success(disabling ? `${userName} 的帳號已停用` : `${userName} 的帳號已啟用`);
+      router.refresh();
+    } catch (error) {
+      notify.error("無法更新帳號狀態", error instanceof Error ? error.message : undefined);
+    } finally {
+      setPending(false);
+    }
   }
 
-  return <span className="admin-user-action"><button className={nextStatus === "disabled" ? "admin-table-danger" : ""} disabled={pending} type="button" onClick={() => void updateStatus()}>{pending ? "處理中…" : nextStatus === "disabled" ? "停用" : "啟用"}</button>{message && <small role="status">{message}</small>}</span>;
+  return (
+    <Button
+      onClick={() => void updateStatus()}
+      pending={pending}
+      pendingLabel="處理中…"
+      size="sm"
+      variant={disabling ? "secondary" : "primary"}
+    >
+      {disabling ? "停用帳號" : "重新啟用"}
+    </Button>
+  );
 }

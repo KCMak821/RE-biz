@@ -1,16 +1,79 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 
+import { EmptyState } from "@/components/app/empty-state";
+import { ListCard } from "@/components/app/data-table";
+import { PageHeader } from "@/components/app/page-header";
+import { StatusBadge } from "@/components/app/status-badge";
+import { formatDate } from "@/lib/format";
 import { listAdminWorkspaces } from "@/lib/platform-admin";
-import { statusLabel } from "@/components/admin/presentation";
 
-function formatDate(date: string) { return new Intl.DateTimeFormat("zh-HK", { dateStyle: "medium" }).format(new Date(date)); }
+export const metadata: Metadata = { title: "工作區｜RE-Biz 平台管理" };
 
 export default async function WorkspacesPage() {
   const workspaces = await listAdminWorkspaces();
-  return <>
-    <div className="admin-page-heading"><div><p>Workspace</p><h1>Workspace 管理</h1><span>查看各 Workspace 的擁有者、成員數與狀態。進入詳情後才能停用或調整可用功能。</span></div></div>
-    {!workspaces.length ? <section className="admin-empty"><h2>目前還沒有建立任何 Workspace</h2><p>使用者完成註冊並建立公司後，Workspace 會顯示在這裡。</p></section> : <div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>名稱</th><th>Workspace ID</th><th>擁有者</th><th>成員數</th><th>狀態</th><th>建立日期</th><th /></tr></thead><tbody>
-      {workspaces.map((workspace) => <tr key={workspace.id}><td><strong>{workspace.name}</strong></td><td><code>{workspace.id}</code></td><td>{workspace.owner ? <>{workspace.owner.name}<small>{workspace.owner.email}</small></> : "—"}</td><td>{workspace.userCount}</td><td><span className={`admin-status ${workspace.status}`}>{statusLabel(workspace.status)}</span></td><td>{formatDate(workspace.createdAt)}</td><td><Link href={`/admin/workspaces/${workspace.id}`}>查看詳情</Link></td></tr>)}
-    </tbody></table></div>}
-  </>;
+
+  return (
+    <div className="page page-wide">
+      <PageHeader
+        crumbs={[{ href: "/admin", label: "平台管理" }, { label: "工作區" }]}
+        description="每個工作區的擁有者、成員數與狀態。進入詳情頁才能暫停工作區或開關個別功能。"
+        title="工作區"
+      />
+      <ListCard footer={workspaces.length ? `共 ${workspaces.length} 個工作區。` : undefined}>
+        {workspaces.length ? (
+          <div className="admin-scroll">
+            <table className="dtable">
+              <thead>
+                <tr>
+                  <th>名稱</th>
+                  <th>擁有者</th>
+                  <th className="is-end">成員數</th>
+                  <th>狀態</th>
+                  <th>建立日期</th>
+                  <th className="is-end">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {workspaces.map((workspace) => (
+                  <tr key={workspace.id}>
+                    <td>
+                      <Link className="dtable-row-link" href={`/admin/workspaces/${workspace.id}`}>
+                        {workspace.name}
+                      </Link>
+                      <small>{workspace.id}</small>
+                    </td>
+                    <td>
+                      {workspace.owner ? (
+                        <>
+                          {workspace.owner.name}
+                          <small>{workspace.owner.email}</small>
+                        </>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
+                    <td className="is-end">{workspace.userCount}</td>
+                    <td>
+                      <StatusBadge domain="workspace" value={workspace.status} />
+                    </td>
+                    <td>{formatDate(workspace.createdAt)}</td>
+                    <td className="is-end">
+                      <Link className="btn btn-secondary btn-sm" href={`/admin/workspaces/${workspace.id}`}>
+                        查看詳情
+                      </Link>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <EmptyState title="還沒有任何工作區">
+            <p>使用者完成註冊並建立公司之後，工作區就會出現在這裡。</p>
+          </EmptyState>
+        )}
+      </ListCard>
+    </div>
+  );
 }

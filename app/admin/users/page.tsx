@@ -1,17 +1,83 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 
+import { ListCard } from "@/components/app/data-table";
+import { EmptyState } from "@/components/app/empty-state";
+import { PageHeader } from "@/components/app/page-header";
+import { StatusBadge } from "@/components/app/status-badge";
 import { UserStatusButton } from "@/components/admin/user-status-button";
-import { platformRoleLabel, roleLabel, statusLabel } from "@/components/admin/presentation";
+import { formatDate } from "@/lib/format";
 import { listAdminUsers } from "@/lib/platform-admin";
+import { platformRoleLabel, roleLabel } from "@/lib/status";
 
-function formatDate(date: string) { return new Intl.DateTimeFormat("zh-HK", { dateStyle: "medium" }).format(new Date(date)); }
+export const metadata: Metadata = { title: "使用者｜RE-Biz 平台管理" };
 
 export default async function UsersPage() {
   const users = await listAdminUsers();
-  return <>
-    <div className="admin-page-heading"><div><p>使用者</p><h1>平台使用者</h1><span>每個 Workspace 歸屬各列一筆，方便確認跨 Workspace 的權限。停用帳號不會刪除既有資料。</span></div></div>
-    {!users.length ? <section className="admin-empty"><h2>目前還沒有建立任何使用者</h2><p>使用者完成註冊後，會依 Workspace 歸屬顯示在這裡。</p></section> : <div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>姓名</th><th>電子郵件</th><th>Workspace</th><th>Workspace 角色</th><th>平台角色</th><th>帳號狀態</th><th>建立日期</th><th /></tr></thead><tbody>
-      {users.map((user) => <tr key={`${user.id}-${user.workspace?.id ?? "none"}`}><td>{user.name}</td><td>{user.email}</td><td>{user.workspace ? <Link href={`/admin/workspaces/${user.workspace.id}`}>{user.workspace.name}</Link> : "—"}</td><td>{user.workspaceRole ? roleLabel(user.workspaceRole) : "—"}</td><td>{platformRoleLabel(user.platformRole)}</td><td><span className={`admin-status ${user.accountStatus}`}>{statusLabel(user.accountStatus)}</span></td><td>{formatDate(user.createdAt)}</td><td><UserStatusButton currentStatus={user.accountStatus} userId={user.id} /></td></tr>)}
-    </tbody></table></div>}
-  </>;
+
+  return (
+    <div className="page page-wide">
+      <PageHeader
+        crumbs={[{ href: "/admin", label: "平台管理" }, { label: "使用者" }]}
+        description="每個工作區歸屬各列一筆，方便確認跨工作區的權限。停用帳號只會阻止登入，既有資料與紀錄都會保留。"
+        title="使用者"
+      />
+      <ListCard footer={users.length ? `共 ${users.length} 筆歸屬紀錄。` : undefined}>
+        {users.length ? (
+          <div className="admin-scroll">
+            <table className="dtable">
+              <thead>
+                <tr>
+                  <th>姓名</th>
+                  <th>電子郵件</th>
+                  <th>工作區</th>
+                  <th>工作區角色</th>
+                  <th>平台角色</th>
+                  <th>登入狀態</th>
+                  <th>建立日期</th>
+                  <th className="is-end">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {users.map((user) => (
+                  <tr key={`${user.id}-${user.workspace?.id ?? "none"}`}>
+                    <td>
+                      <strong>{user.name}</strong>
+                    </td>
+                    <td>{user.email}</td>
+                    <td>
+                      {user.workspace ? (
+                        <Link className="dtable-row-link" href={`/admin/workspaces/${user.workspace.id}`}>
+                          {user.workspace.name}
+                        </Link>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
+                    <td>{user.workspaceRole ? roleLabel(user.workspaceRole) : "—"}</td>
+                    <td>{platformRoleLabel(user.platformRole)}</td>
+                    <td>
+                      <StatusBadge domain="account" value={user.accountStatus} />
+                    </td>
+                    <td>{formatDate(user.createdAt)}</td>
+                    <td className="is-end">
+                      <UserStatusButton
+                        currentStatus={user.accountStatus}
+                        userId={user.id}
+                        userName={user.name}
+                      />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <EmptyState title="還沒有任何使用者">
+            <p>使用者完成註冊之後，會依所屬工作區顯示在這裡。</p>
+          </EmptyState>
+        )}
+      </ListCard>
+    </div>
+  );
 }
