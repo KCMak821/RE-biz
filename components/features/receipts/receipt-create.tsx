@@ -179,7 +179,7 @@ export function ReceiptCreate() {
         ? "接下來會開啟列印視窗，每張收據各自一頁。"
         : batchPrintLayout === "paper-saving"
         ? `接下來會開啟列印視窗，預計使用 ${a4Pages} 張 A4。`
-        : `接下來會開啟 A4 橫式列印視窗，預計使用 ${a4Pages} 張 A4。`,
+        : `接下來會開啟 A4 直式列印視窗，預計使用 ${a4Pages} 張 A4。`,
     );
     window.setTimeout(() => window.print(), 150);
   }
@@ -671,7 +671,7 @@ export function ReceiptCreate() {
                 {batchPrintLayout === "paper-saving"
                   ? "每張 A4 直式紙會上下排列兩張橫向收據，中央標示裁切線。"
                   : batchPrintLayout === "ultra-saving"
-                    ? "每張 A4 橫式紙會並排四張直向長條收據，以三條垂直裁切線分隔。內容較長時會改顯示安全提示。"
+                    ? "每張 A4 直式紙會上下排列四張橫向長條收據，以三條水平裁切線分隔。內容較長時會改顯示安全提示。"
                     : "每張收據各自使用一張 A4，沿用既有的單張版型。"}
               </p>
               <p className="lines-total" style={{ marginTop: 12 }}>

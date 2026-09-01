@@ -140,7 +140,7 @@ function UltraSavingPage({
         page.length > cutIndex ? (
           <div
             aria-hidden="true"
-            className={`mini-cut-guide mini-cut-guide--vertical mini-cut-guide--vertical-${cutIndex}`}
+            className={`mini-cut-guide mini-cut-guide--horizontal mini-cut-guide--horizontal-${cutIndex}`}
             key={cutIndex}
           />
         ) : null,
@@ -180,11 +180,12 @@ function MiniReceiptPaper({
   const isUploadedSignature = template.showSeal && template.sealSource === "uploaded" && Boolean(sealUrl);
   const isGeneratedSeal = template.showSeal && template.sealSource === "generated" && Boolean(template.sealChineseName || template.sealEnglishName);
   const showPayment = template.showPaymentMethod && !paymentMethodIsHidden(receipt.paymentMethod) && Boolean(receipt.paymentMethod);
+  const showSignatureBlock = isUploadedSignature || isGeneratedSeal || template.showSignature;
   const signatureStyle = isUploadedSignature ? miniSignatureStyle(template) : {};
 
   return (
     <article
-      className={`mini-receipt mini-receipt--${index}`}
+      className={`mini-receipt mini-receipt--${index}${showSignatureBlock ? "" : " mini-receipt--no-signature"}`}
       style={{ "--mini-receipt-accent": template.accentColor, ...signatureStyle } as CSSProperties}
     >
       <header className="mini-receipt-header">
@@ -212,7 +213,7 @@ function MiniReceiptPaper({
           {receipt.notes ? <p><small>備註</small>{receipt.notes}</p> : null}
         </div>
       ) : null}
-      {isUploadedSignature || isGeneratedSeal || template.showSignature ? (
+      {showSignatureBlock ? (
         <div className="mini-signature-block">
           <div className="mini-signature-field">
             {isUploadedSignature ? (
