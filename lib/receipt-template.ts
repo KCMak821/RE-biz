@@ -19,18 +19,29 @@ export type ReceiptTemplate = {
 };
 
 export const uploadedSealLayout = {
-  defaultOffsetX: 24,
+  defaultOffsetX: 0,
   defaultOffsetY: 0,
-  defaultScale: 100,
-  maxOffsetY: 12,
-  maxScale: 160,
-  minOffsetY: -12,
-  minScale: 50,
+  defaultScale: 90,
+  maxOffsetY: 8,
+  maxScale: 100,
+  minOffsetY: -8,
+  minScale: 70,
 } as const;
 
-/** The uploaded image must stay inside the 190px signature block. */
+/** The uploaded signature may move only inside its 190px-wide signing field. */
 export function uploadedSealHorizontalLimit(scale: number) {
-  return Math.floor((190 - (94 * scale) / 100) / 2);
+  return Math.floor((190 * (100 - scale)) / 200);
+}
+
+export function normalizeUploadedSealLayout(template: ReceiptTemplate): ReceiptTemplate {
+  const uploadedSealScale = Math.max(uploadedSealLayout.minScale, Math.min(uploadedSealLayout.maxScale, template.uploadedSealScale));
+  const horizontalLimit = uploadedSealHorizontalLimit(uploadedSealScale);
+  return {
+    ...template,
+    uploadedSealOffsetX: Math.max(-horizontalLimit, Math.min(horizontalLimit, template.uploadedSealOffsetX)),
+    uploadedSealOffsetY: Math.max(uploadedSealLayout.minOffsetY, Math.min(uploadedSealLayout.maxOffsetY, template.uploadedSealOffsetY)),
+    uploadedSealScale,
+  };
 }
 
 export const defaultReceiptTemplate: ReceiptTemplate = {

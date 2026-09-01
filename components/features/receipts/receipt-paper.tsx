@@ -6,7 +6,7 @@ import type { CSSProperties } from "react";
 
 import { money } from "@/lib/format";
 import { paymentMethodIsHidden } from "@/lib/receipt-form";
-import { type ReceiptTemplate } from "@/lib/receipt-template";
+import { normalizeUploadedSealLayout, type ReceiptTemplate } from "@/lib/receipt-template";
 import type { ReceiptDraft } from "@/types/records";
 
 /**
@@ -33,17 +33,16 @@ export function ReceiptPaper({
   const lineItems = receipt.lineItems?.length ? receipt.lineItems : undefined;
   const showPaymentMethod = template.showPaymentMethod && !paymentMethodIsHidden(receipt.paymentMethod);
   const usesUploadedSeal = template.sealSource === "uploaded";
-  const uploadedSealStyle = usesUploadedSeal ? uploadedSealLayoutStyle(template, variant) : {};
-  const showSeal =
-    template.showSeal &&
-    (usesUploadedSeal ? Boolean(sealUrl) : Boolean(template.sealChineseName || template.sealEnglishName));
-  const showBottom = showPaymentMethod || template.showSignature || showSeal;
+  const showUploadedSignature = template.showSeal && usesUploadedSeal && Boolean(sealUrl);
+  const uploadedSignatureStyle = showUploadedSignature ? uploadedSignatureLayoutStyle(template, variant) : {};
+  const showGeneratedSeal = template.showSeal && !usesUploadedSeal && Boolean(template.sealChineseName || template.sealEnglishName);
+  const showBottom = showPaymentMethod || template.showSignature || showGeneratedSeal || showUploadedSignature;
 
   return (
     <article
       aria-label="收據內容"
       className={`receipt-paper${variant === "compact" ? " receipt-paper--compact" : ""} template-${template.preset} logo-${template.logoPosition}`}
-      style={{ "--receipt-accent": template.accentColor, ...uploadedSealStyle } as CSSProperties}
+      style={{ "--receipt-accent": template.accentColor, ...uploadedSignatureStyle } as CSSProperties}
     >
       <div className="receipt-topline" />
       <div className="receipt-header">
@@ -154,23 +153,20 @@ export function ReceiptPaper({
               {template.showNotes && receipt.notes ? <p>{receipt.notes}</p> : null}
             </div>
           ) : null}
-          {template.showSignature || showSeal ? (
+          {showUploadedSignature ? (
             <div className="signature-block">
-              {showSeal ? (
-                usesUploadedSeal ? (
-                  <div className="uploaded-seal-frame">
-                    <img alt="公司印章" className="company-seal company-seal-uploaded" src={sealUrl} />
-                  </div>
-                ) : (
-                  <CompanySeal chineseName={template.sealChineseName} englishName={template.sealEnglishName} />
-                )
-              ) : null}
-              {template.showSignature ? (
-                <>
-                  <div className="signature-line" />
-                  <span>Authorized signature</span>
-                </>
-              ) : null}
+              <div className="signature-field">
+                <div className="uploaded-signature-slot">
+                  <img alt="授權簽名" className="uploaded-signature-image" src={sealUrl} />
+                </div>
+                <div className="signature-line" />
+              </div>
+              <span>Authorized signature</span>
+            </div>
+          ) : template.showSignature || showGeneratedSeal ? (
+            <div className="signature-block">
+              {showGeneratedSeal ? <CompanySeal chineseName={template.sealChineseName} englishName={template.sealEnglishName} /> : null}
+              {template.showSignature ? <><div className="signature-line" /><span>Authorized signature</span></> : null}
             </div>
           ) : null}
         </div>
@@ -184,18 +180,13 @@ export function ReceiptPaper({
   );
 }
 
-function uploadedSealLayoutStyle(template: ReceiptTemplate, variant: "compact" | "standard") {
-  const baseSize = variant === "compact" ? 54 : 94;
-  const ratio = baseSize / 94;
-  const size = (baseSize * template.uploadedSealScale) / 100;
-  const offsetY = template.uploadedSealOffsetY * ratio;
-  const gap = variant === "compact" ? 4 : 8;
+function uploadedSignatureLayoutStyle(template: ReceiptTemplate, variant: "compact" | "standard") {
+  const safeTemplate = normalizeUploadedSealLayout(template);
+  const ratio = variant === "compact" ? 132 / 190 : 1;
   return {
-    "--uploaded-seal-frame-height": `${size + gap + Math.abs(offsetY)}px`,
-    "--uploaded-seal-frame-margin-top": `${Math.min(offsetY, 0)}px`,
-    "--uploaded-seal-frame-padding-top": `${Math.max(offsetY, 0)}px`,
-    "--uploaded-seal-offset-x": `${template.uploadedSealOffsetX * ratio}px`,
-    "--uploaded-seal-size": `${size}px`,
+    "--uploaded-signature-offset-x": `${safeTemplate.uploadedSealOffsetX * ratio}px`,
+    "--uploaded-signature-offset-y": `${safeTemplate.uploadedSealOffsetY * ratio}px`,
+    "--uploaded-signature-scale": `${safeTemplate.uploadedSealScale}%`,
   };
 }
 

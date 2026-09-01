@@ -907,11 +907,13 @@ a { color: var(--forest); }
 .payment-details strong { display: block; margin-top: 6px; font-size: 12px; }
 .payment-details p { margin: 9px 0 0; color: #68736d; font-size: 11px; line-height: 1.5; }
 .signature-block { display: grid; justify-items: stretch; min-width: 190px; align-self: flex-end; text-align: center; }
+.signature-field { position: relative; width: 100%; height: 64px; }
 .signature-line { border-top: 1px solid #56645c; margin-bottom: 7px; }
+.signature-field .signature-line { position: absolute; right: 0; bottom: 0; left: 0; margin: 0; }
+.signature-field + span { margin-top: 7px; }
 .company-seal { display: block; width: 94px; height: 94px; margin: 0 auto 8px; color: #0a2679; overflow: visible; transform: translateX(24px); }
-.company-seal-uploaded { object-fit: contain; }
-.uploaded-seal-frame { box-sizing: border-box; width: 100%; height: var(--uploaded-seal-frame-height); margin-top: var(--uploaded-seal-frame-margin-top); padding-top: var(--uploaded-seal-frame-padding-top); overflow: hidden; }
-.uploaded-seal-frame .company-seal-uploaded { position: relative; left: calc(50% + var(--uploaded-seal-offset-x)); width: var(--uploaded-seal-size); height: var(--uploaded-seal-size); margin: 0; transform: translateX(-50%); }
+.uploaded-signature-slot { position: absolute; top: 0; bottom: 8px; left: calc(50% + var(--uploaded-signature-offset-x)); width: var(--uploaded-signature-scale); transform: translateX(-50%); }
+.uploaded-signature-image { display: block; width: 100%; height: 100%; object-fit: contain; object-position: 50% calc(50% + var(--uploaded-signature-offset-y)); }
 .seal-outer-ring, .seal-inner-ring { fill: none; stroke: currentcolor; }
 .seal-outer-ring { stroke-width: 5.1; }
 .seal-outer-ring-inner { stroke-width: 2.4; opacity: 1; }
@@ -955,9 +957,11 @@ a { color: var(--forest); }
 .receipt-paper--compact .payment-details strong { margin-top: 3px; font-size: 10px; }
 .receipt-paper--compact .payment-details p { margin-top: 4px; font-size: 9px; }
 .receipt-paper--compact .signature-block { min-width: 132px; }
+.receipt-paper--compact .signature-field { height: 42px; }
 .receipt-paper--compact .signature-line { margin-bottom: 4px; }
+.receipt-paper--compact .signature-field .signature-line { margin: 0; }
+.receipt-paper--compact .signature-field + span { margin-top: 4px; }
 .receipt-paper--compact .company-seal { width: 54px; height: 54px; margin-bottom: 4px; transform: translateX(16px); }
-.receipt-paper--compact .uploaded-seal-frame .company-seal-uploaded { width: var(--uploaded-seal-size); height: var(--uploaded-seal-size); margin: 0; transform: translateX(-50%); }
 .receipt-paper--compact .receipt-disclaimer { margin-top: 12px; padding-top: 6px; font-size: 9px; }
 .receipt-print-page--paper-saving { display: grid; grid-template-rows: minmax(0, 1fr) 13px minmax(0, 1fr); gap: 0; box-sizing: border-box; width: min(100%, 210mm); aspect-ratio: 210 / 297; margin: 0 auto; padding: 8mm 9mm; background: #fff; }
 .receipt-print-page--paper-saving > .receipt-paper { width: 100%; height: 100%; overflow: hidden; }

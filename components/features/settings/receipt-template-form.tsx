@@ -1,6 +1,6 @@
 "use client";
 
-/* The uploaded seal is served by an authenticated API route and cannot pass
+/* The uploaded signature is served by an authenticated API route and cannot pass
    through Next's image optimizer. */
 /* eslint-disable @next/next/no-img-element */
 
@@ -131,9 +131,9 @@ export function ReceiptTemplateForm() {
       setHasSeal(true);
       setSealVersion(data.sealUpdatedAt);
       update("sealSource", "uploaded");
-      notify.info("印章已上傳", "還要按下「儲存收據樣式」才會套用到收據上。");
+      notify.info("授權簽名圖片已上傳", "還要按下「儲存收據樣式」才會套用到收據上。");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "無法上傳公司印章。");
+      setMessage(error instanceof Error ? error.message : "無法上傳授權簽名圖片。");
     } finally {
       setUploading(false);
     }
@@ -260,11 +260,11 @@ export function ReceiptTemplateForm() {
             </div>
           </FormSection>
 
-          <FormSection description="可以用系統生成的圓印，或上傳公司現有的印章圖片。" title="公司印章">
+          <FormSection description="系統生成的圓印維持公司印章用途；上傳圖片則固定顯示在正式授權簽名欄內。" title="公司印章與授權簽名">
             <CheckboxField
               checked={template.showSeal}
-              description="關閉時收據上不會出現任何印章。"
-              label="在收據上顯示印章"
+              description="關閉時收據上不會出現公司印章或授權簽名圖片。"
+              label="在收據上顯示公司印章／授權簽名"
               onChange={(event) => update("showSeal", event.target.checked)}
             />
 
@@ -278,7 +278,7 @@ export function ReceiptTemplateForm() {
                   type="radio"
                   value="generated"
                 />
-                <strong>系統生成</strong>
+                <strong>公司印章（系統生成）</strong>
                 <span>依中英文公司名稱畫出圓形印章</span>
               </label>
               <label className={template.sealSource === "uploaded" ? "seal-option is-active" : "seal-option"}>
@@ -290,8 +290,8 @@ export function ReceiptTemplateForm() {
                   type="radio"
                   value="uploaded"
                 />
-                <strong>上傳圖片</strong>
-                <span>{hasSeal ? "使用已上傳的公司印章" : "上傳 PNG、JPG 或 WebP"}</span>
+                <strong>授權簽名圖片</strong>
+                <span>{hasSeal ? "固定顯示在 AUTHORIZED SIGNATURE 簽署欄內" : "上傳 PNG、JPG 或 WebP"}</span>
               </label>
             </div>
 
@@ -316,16 +316,16 @@ export function ReceiptTemplateForm() {
             ) : (
               <div className="seal-upload">
                 <div className="seal-upload-row">
-                  {hasSeal && sealUrl ? <img alt="已上傳的公司印章" src={sealUrl} /> : null}
+                  {hasSeal && sealUrl ? <img alt="已上傳的授權簽名" src={sealUrl} /> : null}
                   <p>
                     {hasSeal
-                      ? "已上傳公司印章，你可以換成另一個檔案。"
-                      : "還沒有上傳印章，請先選擇圖片檔。"}
+                      ? "已上傳授權簽名圖片，你可以換成另一個檔案。"
+                      : "還沒有上傳簽名圖片，請先選擇圖片檔。"}
                   </p>
                 </div>
                 <label>
                   <FileUp aria-hidden="true" size={16} />
-                  <span>{uploading ? "上傳中…" : hasSeal ? "更換印章檔案" : "上傳印章檔案"}</span>
+                  <span>{uploading ? "上傳中…" : hasSeal ? "更換簽名圖片" : "上傳簽名圖片"}</span>
                   <input
                     accept="image/png,image/jpeg,image/webp"
                     disabled={!template.showSeal || uploading}
@@ -336,19 +336,19 @@ export function ReceiptTemplateForm() {
                     type="file"
                   />
                 </label>
-                <small>支援 PNG、JPG、WebP。建議使用透明背景，檔案小於 2 MB。</small>
+                <small>支援 PNG、JPG、WebP。系統會移除四周透明或純白留白，檔案小於 2 MB。</small>
               </div>
             )}
 
             {template.showSeal && template.sealSource === "uploaded" && hasSeal ? (
               <section className="seal-layout-adjustment" aria-labelledby="seal-layout-title">
                 <div>
-                  <h3 id="seal-layout-title">印章版面調整</h3>
-                  <p>調整圖片在收據簽署區的位置與大小，變更會即時顯示於右側預覽。</p>
+                  <h3 id="seal-layout-title">簽名版面調整</h3>
+                  <p>調整圖片在正式簽署欄內的位置與大小，變更會即時顯示於右側預覽。</p>
                 </div>
                 <label className="seal-layout-control">
                   <span>
-                    印章大小 <output>{template.uploadedSealScale}%</output>
+                    簽名大小 <output>{template.uploadedSealScale}%</output>
                   </span>
                   <input
                     aria-valuetext={`${template.uploadedSealScale}%`}
@@ -425,11 +425,11 @@ export function ReceiptTemplateForm() {
 }
 
 function formatHorizontalOffset(value: number) {
-  if (value === 0) return "置中 0";
+  if (value === 0) return "置中";
   return value > 0 ? `向右 ${value}` : `向左 ${Math.abs(value)}`;
 }
 
 function formatVerticalOffset(value: number) {
-  if (value === 0) return "不位移 0";
+  if (value === 0) return "置中";
   return value > 0 ? `向下 ${value}` : `向上 ${Math.abs(value)}`;
 }

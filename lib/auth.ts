@@ -5,7 +5,7 @@ import { Binary, ObjectId } from "mongodb";
 import { cookies } from "next/headers";
 
 import { getDatabase } from "@/lib/mongodb";
-import { defaultReceiptTemplate, type ReceiptTemplate } from "@/lib/receipt-template";
+import { defaultReceiptTemplate, normalizeUploadedSealLayout, type ReceiptTemplate } from "@/lib/receipt-template";
 import { defaultWorkspaceFeatures, readWorkspaceFeatures, type WorkspaceFeatures } from "@/lib/workspace-features";
 
 const SESSION_COOKIE = "receipt_session";
@@ -164,7 +164,7 @@ async function toAppUser(user: UserDocument & { _id: ObjectId }): Promise<AppUse
     platformRole: user.platformRole ?? "USER",
     organization: {
       address: organization.address ?? "", bankDetails: organization.bankDetails ?? "", businessRegistration: organization.businessRegistration ?? "", contact: organization.contact ?? "", currency: organization.currency ?? "HKD", email: organization.email ?? "",
-      hasLogo: Boolean(organization.logo), hasSealImage: Boolean(organization.seal), id: organization._id.toHexString(), name: organization.name, phone: organization.phone ?? "", receiptTemplate: { ...defaultReceiptTemplate, ...organization.receiptTemplate }, role: membership.role, sealUpdatedAt: organization.seal?.updatedAt.toISOString(), timeZone: organization.timeZone ?? "Asia/Hong_Kong",
+      hasLogo: Boolean(organization.logo), hasSealImage: Boolean(organization.seal), id: organization._id.toHexString(), name: organization.name, phone: organization.phone ?? "", receiptTemplate: normalizeUploadedSealLayout({ ...defaultReceiptTemplate, ...organization.receiptTemplate }), role: membership.role, sealUpdatedAt: organization.seal?.updatedAt.toISOString(), timeZone: organization.timeZone ?? "Asia/Hong_Kong",
       status: organization.status ?? "active",
     },
   };
