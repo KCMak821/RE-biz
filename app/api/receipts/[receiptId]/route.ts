@@ -21,7 +21,6 @@ export async function GET(_: Request, { params }: { params: Promise<{ receiptId:
     const receipt = await (await receiptsCollection()).findOne({
       _id: new ObjectId(receiptId),
       organizationId: new ObjectId(user.organization.id),
-      createdBy: new ObjectId(user.id),
     });
     if (!receipt) return Response.json({ message: "收據不存在。" }, { status: 404 });
     return Response.json({ receipt: serializeReceipt(receipt) });
@@ -42,7 +41,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ rece
     if (!canManageRecords(user)) return Response.json({ message: "你的角色只有檢視權限，無法確認收款。" }, { status: 403 });
     if (!await canUseWorkspaceFeature(user, "receipts")) return Response.json({ message: "此工作區目前無法使用收據功能。" }, { status: 403 });
     const result = await (await receiptsCollection()).updateOne(
-      { _id: new ObjectId(receiptId), organizationId: new ObjectId(user.organization.id), createdBy: new ObjectId(user.id) },
+      { _id: new ObjectId(receiptId), organizationId: new ObjectId(user.organization.id) },
       { $set: { paymentStatus: "paid", updatedAt: new Date() } },
     );
     if (!result.matchedCount) return Response.json({ message: "收據不存在。" }, { status: 404 });

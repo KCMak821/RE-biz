@@ -26,12 +26,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ inv
     if (!await canUseWorkspaceFeature(user, "invoices")) return Response.json({ message: "此工作區目前無法使用請款單功能。" }, { status: 403 });
 
     const collection = await invoicesCollection();
-    const owned = {
+    // Scoped to the workspace, not to the invoice's creator: any member with
+    // record permission may register a payment on a colleague's invoice.
+    const inWorkspace = {
       _id: new ObjectId(invoiceId),
-      createdBy: new ObjectId(user.id),
       organizationId: new ObjectId(user.organization.id),
     };
-    const invoice = await collection.findOne(owned);
+    const invoice = await collection.findOne(inWorkspace);
     if (!invoice) return Response.json({ message: "請款單不存在。" }, { status: 404 });
     if (invoice.status === "draft") return Response.json({ message: "草稿請款單還沒發送給客戶，請先標示為已發送再登記收款。" }, { status: 409 });
     if (invoice.status === "void") return Response.json({ message: "已作廢的請款單不可登記收款。" }, { status: 409 });
@@ -57,7 +58,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ inv
     // Guarded on the payment total that was just read, so two concurrent
     // requests cannot both pass the overpayment check.
     const result = await collection.findOneAndUpdate(
-      { ...owned, status: invoice.status, paymentStatus: invoice.paymentStatus },
+      { ...inWorkspace, status: invoice.status, paymentStatus: invoice.paymentStatus },
       { $push: { payments: payment }, $set: { paymentStatus, updatedAt: now } },
       { returnDocument: "after" },
     );

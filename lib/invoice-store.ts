@@ -49,8 +49,8 @@ export async function invoicesCollection() {
   const collection = (await getDatabase()).collection<InvoiceDocument>("invoices");
   await Promise.all([
     collection.createIndex({ organizationId: 1, invoiceNumber: 1 }, { unique: true }),
-    collection.createIndex({ organizationId: 1, createdBy: 1, issueDate: -1, createdAt: -1 }),
-    collection.createIndex({ organizationId: 1, createdBy: 1, status: 1, dueDate: 1 }),
+    collection.createIndex({ organizationId: 1, issueDate: -1, createdAt: -1 }),
+    collection.createIndex({ organizationId: 1, status: 1, dueDate: 1 }),
     collection.createIndex({ organizationId: 1, sourceQuoteId: 1 }, { name: "invoice_source_quote_unique", partialFilterExpression: { sourceQuoteId: { $type: "objectId" } }, unique: true }),
   ]);
   return collection;

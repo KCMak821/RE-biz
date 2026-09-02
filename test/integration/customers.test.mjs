@@ -596,12 +596,12 @@ test(
 );
 
 test(
-  "Customer related quotations respect the current quote owner's createdBy scope",
+  "Customer related quotations cover every member of the organization",
   { concurrency: false },
   async () => {
     const customer = (
       await request("/api/customers", {
-        body: customerPayload({ name: "Private related quote customer" }),
+        body: customerPayload({ name: "Shared related quote customer" }),
         method: "POST",
         token: fixture.ownerToken,
       })
@@ -619,39 +619,27 @@ test(
     assert.equal(ownerQuote.response.status, 201);
     assert.equal(operatorQuote.response.status, 201);
 
-    const ownerDetail = await request(`/api/customers/${customer.id}`, {
-      token: fixture.ownerToken,
-    });
-    assert.equal(ownerDetail.response.status, 200);
-    assert.deepEqual(
-      ownerDetail.body.quotations.map((quote) => quote.id),
-      [ownerQuote.body.quote.id],
-    );
-    assert.equal(
-      (
-        await request(`/api/quotes/${ownerQuote.body.quote.id}`, {
-          token: fixture.ownerToken,
-        })
-      ).response.status,
-      200,
-    );
-
-    const operatorDetail = await request(`/api/customers/${customer.id}`, {
-      token: fixture.operatorToken,
-    });
-    assert.equal(operatorDetail.response.status, 200);
-    assert.deepEqual(
-      operatorDetail.body.quotations.map((quote) => quote.id),
-      [operatorQuote.body.quote.id],
-    );
-    assert.equal(
-      (
-        await request(`/api/quotes/${operatorQuote.body.quote.id}`, {
-          token: fixture.operatorToken,
-        })
-      ).response.status,
-      200,
-    );
+    // Both members read the same company data; createdBy is audit trail only.
+    const expected = new Set([
+      ownerQuote.body.quote.id,
+      operatorQuote.body.quote.id,
+    ]);
+    for (const token of [fixture.ownerToken, fixture.operatorToken]) {
+      const detail = await request(`/api/customers/${customer.id}`, { token });
+      assert.equal(detail.response.status, 200);
+      assert.deepEqual(
+        new Set(detail.body.quotations.map((quote) => quote.id)),
+        expected,
+      );
+    }
+    for (const id of expected) {
+      for (const token of [fixture.ownerToken, fixture.operatorToken]) {
+        assert.equal(
+          (await request(`/api/quotes/${id}`, { token })).response.status,
+          200,
+        );
+      }
+    }
   },
 );
 

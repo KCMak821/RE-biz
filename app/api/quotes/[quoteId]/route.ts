@@ -54,14 +54,18 @@ function serialize(document: QuoteDocument & { _id: ObjectId }) {
     validUntil: document.validUntil,
   };
 }
-async function ownedQuote(
+/**
+ * Reads one quote inside the caller's workspace. The organization is the whole
+ * tenant boundary: any member may open a quote a colleague created, while a
+ * quote belonging to another organization is never returned.
+ */
+async function workspaceQuote(
   id: ObjectId,
   user: NonNullable<Awaited<ReturnType<typeof getCurrentUser>>>,
 ) {
   return (await quotesCollection()).findOne({
     _id: id,
     organizationId: new ObjectId(user.organization.id),
-    createdBy: new ObjectId(user.id),
   });
 }
 
@@ -79,7 +83,7 @@ export async function GET(
         { message: "此工作區目前無法使用報價單功能。" },
         { status: 403 },
       );
-    const quote = await ownedQuote(id, user);
+    const quote = await workspaceQuote(id, user);
     if (!quote)
       return Response.json({ message: "報價單不存在。" }, { status: 404 });
     const receipt = quote.receiptId
@@ -88,18 +92,16 @@ export async function GET(
         ).findOne({
           _id: quote.receiptId,
           organizationId: new ObjectId(user.organization.id),
-          createdBy: new ObjectId(user.id),
         })
       : await (
           await receiptsCollection()
         ).findOne({
           sourceQuoteId: id,
           organizationId: new ObjectId(user.organization.id),
-          createdBy: new ObjectId(user.id),
         });
     const invoice = quote.invoiceId
-      ? await (await invoicesCollection()).findOne({ _id: quote.invoiceId, organizationId: new ObjectId(user.organization.id), createdBy: new ObjectId(user.id) })
-      : await (await invoicesCollection()).findOne({ sourceQuoteId: id, organizationId: new ObjectId(user.organization.id), createdBy: new ObjectId(user.id) });
+      ? await (await invoicesCollection()).findOne({ _id: quote.invoiceId, organizationId: new ObjectId(user.organization.id) })
+      : await (await invoicesCollection()).findOne({ sourceQuoteId: id, organizationId: new ObjectId(user.organization.id) });
     return Response.json({
       quote: serialize(quote),
       receipt: receipt
@@ -143,7 +145,7 @@ export async function PUT(
         { message: "此工作區目前無法使用報價單功能。" },
         { status: 403 },
       );
-    const quote = await ownedQuote(id, user);
+    const quote = await workspaceQuote(id, user);
     if (!quote)
       return Response.json({ message: "報價單不存在。" }, { status: 404 });
     if (statusRequest.success) {
@@ -169,7 +171,6 @@ export async function PUT(
         {
           _id: id,
           organizationId: new ObjectId(user.organization.id),
-          createdBy: new ObjectId(user.id),
         },
         { $set: { status: statusRequest.data.status, updatedAt: new Date() } },
         { returnDocument: "after" },
@@ -210,7 +211,6 @@ export async function PUT(
       {
         _id: id,
         organizationId: new ObjectId(user.organization.id),
-        createdBy: new ObjectId(user.id),
         status: "draft",
       },
       {

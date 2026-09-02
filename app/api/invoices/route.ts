@@ -25,7 +25,7 @@ export async function GET(request: Request) {
     const { page: requestedPage, pageSize } = readPageParams(searchParams);
     const status = searchParams.get("status") ?? "all";
     if (!["all", "draft", "unpaid", "overdue", "partially_paid", "paid", "void"].includes(status)) return Response.json({ message: "請款單狀態篩選不正確。" }, { status: 400 });
-    const baseFilter = { organizationId: new ObjectId(user.organization.id), createdBy: new ObjectId(user.id) };
+    const baseFilter = { organizationId: new ObjectId(user.organization.id) };
     const filter: Record<string, unknown> = { ...baseFilter };
     if (status === "draft" || status === "void") filter.status = status;
     else if (status === "paid" || status === "partially_paid") { filter.status = "sent"; filter.paymentStatus = status; }

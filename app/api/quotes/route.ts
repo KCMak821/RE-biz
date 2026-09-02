@@ -46,7 +46,7 @@ export async function GET(request: Request) {
     const { page: requestedPage, pageSize } = readPageParams(searchParams);
     const requestedStatus = searchParams.get("status");
     const today = new Date().toISOString().slice(0, 10);
-    const baseFilter = { organizationId: new ObjectId(user.organization.id), createdBy: new ObjectId(user.id) };
+    const baseFilter = { organizationId: new ObjectId(user.organization.id) };
     const filter: Record<string, unknown> = { ...baseFilter };
     if (requestedStatus === "expired") filter.validUntil = { $lt: today };
     else if (["draft", "sent", "accepted", "rejected"].includes(requestedStatus ?? "")) {
@@ -87,12 +87,12 @@ export async function POST(request: Request) {
     if (!canManageRecords(user)) return Response.json({ message: "你的角色只有檢視權限，無法建立報價單。" }, { status: 403 });
     if (!await canUseWorkspaceFeature(user, "quotations")) return Response.json({ message: "此工作區目前無法使用報價單功能。" }, { status: 403 });
     const resolved = await resolveQuotePayload(user, parsed.data);
-    const now = new Date(); const userId = new ObjectId(user.id);
+    const now = new Date(); const userId = new ObjectId(user.id); const organizationId = new ObjectId(user.organization.id);
     const document: QuoteDocument = {
       companySnapshot: companySnapshot(user), createdAt: now, createdBy: userId, currency: "HKD",
       customerId: resolved.customerId ? new ObjectId(resolved.customerId) : undefined, customerSnapshot: resolved.customer,
-      issueDate: resolved.issueDate, lines: resolved.lines, notes: resolved.notes, organizationId: new ObjectId(user.organization.id),
-      quoteNumber: await nextQuoteNumber(userId, resolved.issueDate), status: "draft", terms: resolved.terms,
+      issueDate: resolved.issueDate, lines: resolved.lines, notes: resolved.notes, organizationId,
+      quoteNumber: await nextQuoteNumber(organizationId, resolved.issueDate), status: "draft", terms: resolved.terms,
       totalAmount: resolved.totalAmount, totalDiscount: resolved.totalDiscount, updatedAt: now, validUntil: resolved.validUntil,
     };
     const result = await (await quotesCollection()).insertOne(document);

@@ -19,8 +19,8 @@ export type ItemDocument = ItemFields & {
 export async function itemsCollection() {
   const collection = (await getDatabase()).collection<ItemDocument>("items");
   await Promise.all([
-    collection.createIndex({ organizationId: 1, createdBy: 1, isActive: 1, name: 1 }),
-    collection.createIndex({ organizationId: 1, createdBy: 1, updatedAt: -1 }),
+    collection.createIndex({ organizationId: 1, isActive: 1, name: 1 }),
+    collection.createIndex({ organizationId: 1, updatedAt: -1 }),
   ]);
   return collection;
 }

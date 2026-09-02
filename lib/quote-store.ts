@@ -47,27 +47,27 @@ export type QuoteDocument = {
 type QuoteCounter = {
   createdAt: Date;
   monthKey: string;
+  organizationId: ObjectId;
   sequence: number;
   updatedAt: Date;
-  userId: ObjectId;
 };
 
 export async function quotesCollection() {
   const collection = (await getDatabase()).collection<QuoteDocument>("quotes");
   await Promise.all([
+    // The organization is the tenant boundary, so a quote number is unique
+    // company-wide rather than per creator.
     collection.createIndex(
-      { organizationId: 1, createdBy: 1, quoteNumber: 1 },
+      { organizationId: 1, quoteNumber: 1 },
       { unique: true },
     ),
     collection.createIndex({
       organizationId: 1,
-      createdBy: 1,
       issueDate: -1,
       createdAt: -1,
     }),
     collection.createIndex({
       organizationId: 1,
-      createdBy: 1,
       status: 1,
       validUntil: 1,
     }),
@@ -79,23 +79,30 @@ async function quoteCountersCollection() {
   const collection = (await getDatabase()).collection<QuoteCounter>(
     "quoteCounters",
   );
-  await collection.createIndex({ userId: 1, monthKey: 1 }, { unique: true });
+  await collection.createIndex(
+    { organizationId: 1, monthKey: 1 },
+    { unique: true },
+  );
   return collection;
 }
 
-export async function nextQuoteNumber(userId: ObjectId, issueDate: string) {
+export async function nextQuoteNumber(
+  organizationId: ObjectId,
+  issueDate: string,
+) {
   const monthKey = issueDate.slice(0, 7).replace("-", "");
   const counters = await quoteCountersCollection();
   // Unique counters plus retry on an initial upsert race make concurrent quote
-  // creation safe while keeping the sequence private to its logged-in user.
+  // creation safe. The sequence is organization-wide, so every member of one
+  // workspace draws from a single shared quote number series.
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
       const counter = await counters.findOneAndUpdate(
-        { monthKey, userId },
+        { monthKey, organizationId },
         {
           $inc: { sequence: 1 },
           $set: { updatedAt: new Date() },
-          $setOnInsert: { createdAt: new Date(), monthKey, userId },
+          $setOnInsert: { createdAt: new Date(), monthKey, organizationId },
         },
         { returnDocument: "after", upsert: true },
       );

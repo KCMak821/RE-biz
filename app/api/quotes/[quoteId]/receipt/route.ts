@@ -15,11 +15,11 @@ export async function POST(_: Request, { params }: { params: Promise<{ quoteId: 
     if (!canManageRecords(user)) return Response.json({ message: "你的角色只有檢視權限，無法建立收據草稿。" }, { status: 403 });
     if (!await canUseWorkspaceFeature(user, "quotations") || !await canUseWorkspaceFeature(user, "receipts")) return Response.json({ message: "此工作區目前無法建立報價單收據。" }, { status: 403 });
     const organizationId = new ObjectId(user.organization.id); const userId = new ObjectId(user.id); const id = new ObjectId(quoteId);
-    const quote = await (await quotesCollection()).findOne({ _id: id, organizationId, createdBy: userId });
+    const quote = await (await quotesCollection()).findOne({ _id: id, organizationId });
     if (!quote) return Response.json({ message: "報價單不存在。" }, { status: 404 });
     if (quoteEffectiveStatus(quote.status, quote.validUntil) !== "accepted") return Response.json({ message: "只有已接受且未失效的報價單可建立收據草稿。" }, { status: 409 });
     const receipts = await receiptsCollection();
-    const existing = await receipts.findOne({ sourceQuoteId: id, organizationId, createdBy: userId });
+    const existing = await receipts.findOne({ sourceQuoteId: id, organizationId });
     if (existing) return Response.json({ message: "此報價單已建立收據草稿。", receipt: { id: existing._id.toHexString(), receiptNumber: existing.receiptNumber } }, { status: 409 });
     const [receiptNumber] = await nextReceiptNumbers(organizationId, [{ issueDate: new Date().toISOString().slice(0, 10) }]);
     const now = new Date();
@@ -34,13 +34,13 @@ export async function POST(_: Request, { params }: { params: Promise<{ quoteId: 
     };
     try {
       const result = await receipts.insertOne(receipt);
-      await (await quotesCollection()).updateOne({ _id: id, organizationId, createdBy: userId }, { $set: { receiptId: result.insertedId, updatedAt: now } });
+      await (await quotesCollection()).updateOne({ _id: id, organizationId }, { $set: { receiptId: result.insertedId, updatedAt: now } });
       return Response.json({ receipt: { id: result.insertedId.toHexString(), paymentStatus: "pending", receiptNumber } }, { status: 201 });
     } catch (error) {
       if (!(typeof error === "object" && error && "code" in error && error.code === 11000)) throw error;
-      const duplicate = await receipts.findOne({ sourceQuoteId: id, organizationId, createdBy: userId });
+      const duplicate = await receipts.findOne({ sourceQuoteId: id, organizationId });
       if (duplicate) {
-        await (await quotesCollection()).updateOne({ _id: id, organizationId, createdBy: userId }, { $set: { receiptId: duplicate._id, updatedAt: new Date() } });
+        await (await quotesCollection()).updateOne({ _id: id, organizationId }, { $set: { receiptId: duplicate._id, updatedAt: new Date() } });
         return Response.json({ message: "此報價單已建立收據草稿。", receipt: { id: duplicate._id.toHexString(), receiptNumber: duplicate.receiptNumber } }, { status: 409 });
       }
       throw error;

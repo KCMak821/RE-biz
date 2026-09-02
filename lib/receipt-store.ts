@@ -62,7 +62,7 @@ export async function receiptsCollection() {
   const collection = (await getDatabase()).collection<ReceiptDocument>("receipts");
   await Promise.all([
     collection.createIndex({ organizationId: 1, receiptNumber: 1 }, { unique: true }),
-    collection.createIndex({ organizationId: 1, createdBy: 1, issueDate: -1, createdAt: -1 }),
+    collection.createIndex({ organizationId: 1, issueDate: -1, createdAt: -1 }),
     // A compound sparse index would still index every ordinary receipt because
     // organizationId is present. Restrict uniqueness only to quote-sourced
     // receipts so existing manual receipts remain fully compatible.

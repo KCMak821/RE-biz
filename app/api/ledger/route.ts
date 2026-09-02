@@ -47,7 +47,6 @@ export async function GET(request: Request) {
     const { page: requestedPage, pageSize } = readPageParams(searchParams);
 
     const organizationId = new ObjectId(user.organization.id);
-    const userId = new ObjectId(user.id);
     const database = await getDatabase();
     const collection = await ledgerCollection();
 
@@ -55,14 +54,14 @@ export async function GET(request: Request) {
        The totals always cover every record, never just the current page. */
     const [totals, receiptTotal] = await Promise.all([
       collection.aggregate<{ _id: "IN" | "OUT"; total: number }>([
-        { $match: { organizationId, createdBy: userId } },
+        { $match: { organizationId } },
         { $group: { _id: "$type", total: { $sum: "$amount" } } },
       ]).toArray(),
       database.collection("receipts").aggregate<{ total: number }>([
         // Older ordinary receipts had no paymentStatus and remain paid for
         // backwards compatibility. Quote-created drafts are explicitly
         // pending, so they never become income until confirmation.
-        { $match: { organizationId, createdBy: userId, paymentStatus: { $ne: "pending" } } },
+        { $match: { organizationId, paymentStatus: { $ne: "pending" } } },
         { $group: { _id: null, total: { $sum: "$amount" } } },
       ]).toArray(),
     ]);
@@ -73,11 +72,13 @@ export async function GET(request: Request) {
     /* ------------------------------------------------------------------- list
        Manual entries and receipt-backed income live in two collections, so the
        page is cut across a union of both rather than in application memory. */
-    const manualMatch: Record<string, unknown> = { organizationId, createdBy: userId };
+    // Income, expense and balance are the whole company's, so every member of
+    // an organization reads identical totals.
+    const manualMatch: Record<string, unknown> = { organizationId };
     if (type !== "all") manualMatch.type = type;
     if (keyword) manualMatch.description = keywordRegex(keyword);
 
-    const receiptMatch: Record<string, unknown> = { organizationId, createdBy: userId, paymentStatus: { $ne: "pending" } };
+    const receiptMatch: Record<string, unknown> = { organizationId, paymentStatus: { $ne: "pending" } };
     if (keyword) {
       const expression = keywordRegex(keyword);
       receiptMatch.$or = [{ receiptNumber: expression }, { payerName: expression }];

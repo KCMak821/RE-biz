@@ -6,6 +6,7 @@ export const E2E_MONGODB_URI = process.env.TEST_MONGODB_URI ?? "mongodb://127.0.
 
 export const owner = { email: "e2e-owner@rebiz.test", name: "E2E 擁有者", password: "e2e-owner-password-2026" };
 export const viewer = { email: "e2e-viewer@rebiz.test", name: "E2E 檢視者", password: "e2e-viewer-password-2026" };
+export const operator = { email: "e2e-operator@rebiz.test", name: "E2E 操作員", password: "e2e-operator-password-2026" };
 export const customerName = "E2E 客戶有限公司";
 
 /**
@@ -29,6 +30,7 @@ export default async function globalSetup() {
     const organizationId = new ObjectId();
     const ownerId = new ObjectId();
     const viewerId = new ObjectId();
+    const operatorId = new ObjectId();
     const now = new Date();
 
     await database.collection("organizations").insertOne({
@@ -50,6 +52,7 @@ export default async function globalSetup() {
     for (const [id, person, role] of [
       [ownerId, owner, "owner"],
       [viewerId, viewer, "viewer"],
+      [operatorId, operator, "operator"],
     ] as const) {
       await database.collection("users").insertOne({
         _id: id,

@@ -33,9 +33,10 @@ export async function GET(request: Request) {
 
     const collection = await receiptsCollection();
     const organizationId = new ObjectId(user.organization.id);
-    // Receipts stay scoped to their creator, matching the existing
-    // per-user isolation for receipts, ledger, quotes and invoices.
-    const baseFilter = { organizationId, createdBy: new ObjectId(user.id) };
+    // Receipts belong to the workspace, so every member of the organization
+    // reads the same list. The stored createdBy is audit trail only and never
+    // narrows what a member can see.
+    const baseFilter = { organizationId };
     const filter: Record<string, unknown> = { ...baseFilter };
     // Receipts saved before paymentStatus existed are treated as paid.
     if (status === "pending") filter.paymentStatus = "pending";

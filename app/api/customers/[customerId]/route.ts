@@ -59,7 +59,6 @@ export async function GET(
         {
           organizationId: new ObjectId(user.organization.id),
           customerId: id,
-          createdBy: new ObjectId(user.id),
         },
         {
           projection: {
