@@ -19,10 +19,10 @@ export default async function UsersPage() {
     <div className="page page-wide">
       <PageHeader
         crumbs={[{ href: "/admin", label: "平台管理" }, { label: "使用者" }]}
-        description="每個工作區歸屬各列一筆，方便確認跨工作區的權限。停用帳號只會阻止登入，既有資料與紀錄都會保留。"
+        description="平台上的每個帳號一列，含所屬公司數與平台角色。停用帳號只會阻止登入，既有資料與紀錄都會保留。"
         title="使用者"
       />
-      <ListCard footer={users.length ? `共 ${users.length} 筆歸屬紀錄。` : undefined}>
+      <ListCard footer={users.length ? `共 ${users.length} 個帳號。` : undefined}>
         {users.length ? (
           <div className="admin-scroll">
             <table className="dtable">
@@ -30,8 +30,8 @@ export default async function UsersPage() {
                 <tr>
                   <th>姓名</th>
                   <th>電子郵件</th>
-                  <th>工作區</th>
-                  <th>工作區角色</th>
+                  <th className="is-end">所屬公司數</th>
+                  <th>所屬公司</th>
                   <th>平台角色</th>
                   <th>登入狀態</th>
                   <th>建立日期</th>
@@ -40,21 +40,24 @@ export default async function UsersPage() {
               </thead>
               <tbody>
                 {users.map((user) => (
-                  <tr key={`${user.id}-${user.workspace?.id ?? "none"}`}>
+                  <tr key={user.id}>
                     <td>
                       <strong>{user.name}</strong>
                     </td>
                     <td>{user.email}</td>
+                    <td className="is-end">{user.workspaceCount}</td>
                     <td>
-                      {user.workspace ? (
-                        <Link className="dtable-row-link" href={`/admin/workspaces/${user.workspace.id}`}>
-                          {user.workspace.name}
-                        </Link>
-                      ) : (
-                        "—"
-                      )}
+                      {user.workspaces.length
+                        ? user.workspaces.map((workspace) => (
+                            <div key={workspace.id}>
+                              <Link className="dtable-row-link" href={`/admin/workspaces/${workspace.id}`}>
+                                {workspace.name}
+                              </Link>
+                              <small>{roleLabel(workspace.role)}</small>
+                            </div>
+                          ))
+                        : "—"}
                     </td>
-                    <td>{user.workspaceRole ? roleLabel(user.workspaceRole) : "—"}</td>
                     <td>{platformRoleLabel(user.platformRole)}</td>
                     <td>
                       <StatusBadge domain="account" value={user.accountStatus} />
@@ -74,7 +77,7 @@ export default async function UsersPage() {
           </div>
         ) : (
           <EmptyState title="還沒有任何使用者">
-            <p>使用者完成註冊之後，會依所屬工作區顯示在這裡。</p>
+            <p>使用者完成註冊之後，會顯示在這裡。</p>
           </EmptyState>
         )}
       </ListCard>

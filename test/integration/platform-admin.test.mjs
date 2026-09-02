@@ -494,10 +494,317 @@ test(
   },
 );
 
+const adminPagePaths = [
+  "/admin",
+  "/admin/workspaces",
+  "/admin/users",
+  "/admin/usage",
+  "/admin/audit-logs",
+];
+
+async function requestPage(path, token) {
+  return fetch(`${baseUrl}${path}`, {
+    headers: token ? { cookie: `receipt_session=${token}` } : {},
+    redirect: "manual",
+  });
+}
+
 test(
-  "successful admin mutations still return success when audit logging fails",
+  "super admins can open every Platform Admin page",
   { concurrency: false },
   async () => {
+    for (const path of [
+      ...adminPagePaths,
+      `/admin/workspaces/${fixture.workspaceAId}`,
+    ]) {
+      const response = await requestPage(path, fixture.superAdminToken);
+      assert.equal(response.status, 200, `expected 200 for ${path}`);
+    }
+  },
+);
+
+test(
+  "workspace owners are rejected server-side from every Platform Admin page",
+  { concurrency: false },
+  async () => {
+    for (const path of [
+      ...adminPagePaths,
+      `/admin/workspaces/${fixture.workspaceAId}`,
+    ]) {
+      // The guard is a redirect from the server component, so a normal user
+      // never receives the page markup — hiding the link is not what stops them.
+      const response = await requestPage(path, fixture.userAToken);
+      assert.ok(
+        [302, 303, 307, 308].includes(response.status),
+        `expected a redirect for ${path}, got ${response.status}`,
+      );
+      assert.equal(
+        new URL(response.headers.get("location"), baseUrl).pathname,
+        "/",
+      );
+    }
+  },
+);
+
+test(
+  "signed-out visitors are rejected server-side from every Platform Admin page",
+  { concurrency: false },
+  async () => {
+    for (const path of adminPagePaths) {
+      const response = await requestPage(path);
+      assert.ok(
+        [302, 303, 307, 308].includes(response.status),
+        `expected a redirect for ${path}, got ${response.status}`,
+      );
+    }
+  },
+);
+
+test(
+  "the admin workspace view keeps one company's data out of another's",
+  { concurrency: false },
+  async () => {
+    const a = await request(`/api/admin/workspaces/${fixture.workspaceAId}`, {
+      token: fixture.superAdminToken,
+    });
+    const b = await request(`/api/admin/workspaces/${fixture.workspaceBId}`, {
+      token: fixture.superAdminToken,
+    });
+    assert.equal(a.response.status, 200);
+    assert.equal(b.response.status, 200);
+
+    // The only seeded receipt belongs to Workspace B.
+    assert.equal(a.body.workspace.usage.receipts, 0);
+    assert.equal(b.body.workspace.usage.receipts, 1);
+
+    const emailsInA = a.body.workspace.members.map((member) => member.email);
+    const emailsInB = b.body.workspace.members.map((member) => member.email);
+    assert.deepEqual(emailsInA, ["user-a@example.test"]);
+    assert.deepEqual(emailsInB, ["user-b@example.test"]);
+  },
+);
+
+test(
+  "suspending a workspace blocks its users and reactivating restores them",
+  { concurrency: false },
+  async () => {
+    const suspend = await request(
+      `/api/admin/workspaces/${fixture.workspaceAId}`,
+      {
+        body: { status: "suspended" },
+        method: "PATCH",
+        token: fixture.superAdminToken,
+      },
+    );
+    assert.equal(suspend.response.status, 200);
+
+    const whileSuspended = await request("/api/receipts", {
+      token: fixture.userAToken,
+    });
+    assert.equal(whileSuspended.response.status, 403);
+    const page = await requestPage("/dashboard", fixture.userAToken);
+    assert.equal(
+      new URL(page.headers.get("location"), baseUrl).pathname,
+      "/workspace-suspended",
+    );
+
+    const reactivate = await request(
+      `/api/admin/workspaces/${fixture.workspaceAId}`,
+      {
+        body: { status: "active" },
+        method: "PATCH",
+        token: fixture.superAdminToken,
+      },
+    );
+    assert.equal(reactivate.response.status, 200);
+
+    // Nothing was deleted on the way through: the workspace works again.
+    const afterReactivate = await request("/api/receipts", {
+      token: fixture.userAToken,
+    });
+    assert.equal(afterReactivate.response.status, 200);
+  },
+);
+
+test(
+  "suspend, reactivate and feature switches are written to the audit log",
+  { concurrency: false },
+  async () => {
+    await request(
+      `/api/admin/workspaces/${fixture.workspaceAId}/features/receipts`,
+      {
+        body: { enabled: false },
+        method: "PATCH",
+        token: fixture.superAdminToken,
+      },
+    );
+    const whileDisabled = await request("/api/receipts", {
+      token: fixture.userAToken,
+    });
+    assert.equal(whileDisabled.response.status, 403);
+    await request(
+      `/api/admin/workspaces/${fixture.workspaceAId}/features/receipts`,
+      {
+        body: { enabled: true },
+        method: "PATCH",
+        token: fixture.superAdminToken,
+      },
+    );
+
+    const logs = await request("/api/admin/audit-logs", {
+      token: fixture.superAdminToken,
+    });
+    assert.equal(logs.response.status, 200);
+    const actionsForA = logs.body.auditLogs
+      .filter((log) => log.targetId.startsWith(fixture.workspaceAId.toHexString()))
+      .map((log) => log.action);
+    for (const action of [
+      "WORKSPACE_SUSPENDED",
+      "WORKSPACE_REACTIVATED",
+      "FEATURE_DISABLED",
+      "FEATURE_ENABLED",
+    ]) {
+      assert.ok(
+        actionsForA.includes(action),
+        `expected ${action} in the audit log`,
+      );
+    }
+
+    const featureLog = logs.body.auditLogs.find(
+      (log) => log.action === "FEATURE_DISABLED",
+    );
+    assert.equal(featureLog.metadata.featureKey, "receipts");
+    assert.equal(featureLog.metadata.enabled, false);
+    assert.equal(featureLog.actor.email, "super-admin@example.test");
+  },
+);
+
+test(
+  "filtering the audit log by company excludes other companies",
+  { concurrency: false },
+  async () => {
+    const filtered = await request(
+      `/api/admin/audit-logs?workspaceId=${fixture.workspaceAId}`,
+      { token: fixture.superAdminToken },
+    );
+    assert.equal(filtered.response.status, 200);
+    assert.ok(filtered.body.auditLogs.length > 0);
+    for (const log of filtered.body.auditLogs) {
+      assert.ok(
+        log.targetId.startsWith(fixture.workspaceAId.toHexString()),
+        `${log.targetId} does not belong to workspace A`,
+      );
+    }
+
+    // A date window in the past matches nothing that was just written.
+    const outOfRange = await request(
+      "/api/admin/audit-logs?from=2000-01-01&to=2000-01-02",
+      { token: fixture.superAdminToken },
+    );
+    assert.equal(outOfRange.body.auditLogs.length, 0);
+  },
+);
+
+test(
+  "workspace owners cannot read the platform user or audit endpoints",
+  { concurrency: false },
+  async () => {
+    for (const path of [
+      "/api/admin/overview",
+      "/api/admin/users",
+      "/api/admin/usage",
+      "/api/admin/audit-logs",
+    ]) {
+      const result = await request(path, { token: fixture.userAToken });
+      assert.equal(result.response.status, 403, `expected 403 for ${path}`);
+    }
+  },
+);
+
+test(
+  "the platform user list reports one row per person with a workspace count",
+  { concurrency: false },
+  async () => {
+    const result = await request("/api/admin/users", {
+      token: fixture.superAdminToken,
+    });
+    assert.equal(result.response.status, 200);
+    const ids = result.body.users.map((user) => user.id);
+    assert.equal(new Set(ids).size, ids.length);
+    const userA = result.body.users.find(
+      (user) => user.email === "user-a@example.test",
+    );
+    assert.equal(userA.workspaceCount, 1);
+    assert.equal(userA.workspaces[0].name, "Workspace A");
+    const superAdmin = result.body.users.find(
+      (user) => user.email === "super-admin@example.test",
+    );
+    assert.equal(superAdmin.platformRole, "SUPER_ADMIN");
+  },
+);
+
+test(
+  "the workspace list can be searched by name and by owner email",
+  { concurrency: false },
+  async () => {
+    const byName = await request("/api/admin/workspaces?q=Workspace%20B", {
+      token: fixture.superAdminToken,
+    });
+    assert.deepEqual(
+      byName.body.workspaces.map((workspace) => workspace.name),
+      ["Workspace B"],
+    );
+
+    const byOwner = await request("/api/admin/workspaces?q=user-a@example", {
+      token: fixture.superAdminToken,
+    });
+    assert.deepEqual(
+      byOwner.body.workspaces.map((workspace) => workspace.name),
+      ["Workspace A"],
+    );
+
+    const noMatch = await request("/api/admin/workspaces?q=nothing-matches", {
+      token: fixture.superAdminToken,
+    });
+    assert.deepEqual(noMatch.body.workspaces, []);
+  },
+);
+
+/**
+ * Whether the deployment under test can run multi-document transactions. The
+ * bundled docker-compose MongoDB is a standalone server and cannot; a replica
+ * set or Atlas can. The platform admin pairs each change with its audit record
+ * in a transaction where one is available, and the guarantee it can offer
+ * differs between the two, so the assertion below has to follow suit.
+ */
+async function supportsTransactions() {
+  const session = client.startSession();
+  try {
+    await session.withTransaction(async () => {
+      await database
+        .collection("transactionProbe")
+        .insertOne({ probe: true }, { session });
+    });
+    return true;
+  } catch {
+    return false;
+  } finally {
+    await session.endSession();
+    await database
+      .collection("transactionProbe")
+      .drop()
+      .catch(() => {});
+  }
+}
+
+test(
+  "a failed audit write never leaves an unlogged change behind",
+  { concurrency: false },
+  async () => {
+    const transactional = await supportsTransactions();
+    const auditLogsBefore = await database
+      .collection("platformAuditLogs")
+      .countDocuments();
     await database.command({
       collMod: "platformAuditLogs",
       validationAction: "error",
@@ -514,22 +821,35 @@ test(
         token: fixture.superAdminToken,
       },
     );
-    assert.equal(result.response.status, 200);
     const workspace = await database
       .collection("organizations")
       .findOne({ _id: fixture.workspaceBId });
-    assert.equal(workspace?.status, "suspended");
+
+    if (transactional) {
+      // The change and its audit record share one transaction, so an audit
+      // failure rolls the change back rather than leaving it unlogged.
+      assert.equal(result.response.status, 503);
+      assert.notEqual(workspace?.status, "suspended");
+    } else {
+      // Without transactions the mutation is the source of truth: it is never
+      // reported as failed because only its audit write failed, and the failure
+      // is logged instead.
+      assert.equal(result.response.status, 200);
+      assert.equal(workspace?.status, "suspended");
+      assert.equal(
+        await waitFor(() =>
+          serverOutput.includes(
+            "Platform audit log write failed after a successful mutation",
+          ),
+        ),
+        true,
+      );
+    }
+
+    // Either way, no audit row was written for a change that was not logged.
     assert.equal(
       await database.collection("platformAuditLogs").countDocuments(),
-      0,
-    );
-    assert.equal(
-      await waitFor(() =>
-        serverOutput.includes(
-          "Platform audit log write failed after a successful mutation",
-        ),
-      ),
-      true,
+      auditLogsBefore,
     );
   },
 );

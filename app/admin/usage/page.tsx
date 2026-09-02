@@ -1,22 +1,15 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { ObjectId } from "mongodb";
 
 import { ListCard } from "@/components/app/data-table";
 import { EmptyState } from "@/components/app/empty-state";
 import { PageHeader } from "@/components/app/page-header";
-import { getWorkspaceUsage, listAdminWorkspaces } from "@/lib/platform-admin";
+import { listAdminWorkspaces } from "@/lib/platform-admin";
 
 export const metadata: Metadata = { title: "使用量｜RE-Biz 平台管理" };
 
 export default async function UsagePage() {
-  const workspaces = await listAdminWorkspaces();
-  const rows = await Promise.all(
-    workspaces.map(async (workspace) => ({
-      ...workspace,
-      usage: await getWorkspaceUsage(new ObjectId(workspace.id)),
-    })),
-  );
+  const rows = await listAdminWorkspaces();
 
   return (
     <div className="page page-wide">

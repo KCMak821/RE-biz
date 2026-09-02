@@ -27,6 +27,13 @@ export function auditTargetLabel(value: string) {
   return auditTargetLabels[value] ?? "平台資料";
 }
 
+/**
+ * Every audit row is written in the same transaction as the change it
+ * describes (or, where the deployment cannot run one, only after that change
+ * succeeded), so a row exists only for a change that actually landed.
+ */
+export const auditResultLabel = "成功";
+
 export function auditMetadataLabel(metadata: unknown) {
   if (!metadata || typeof metadata !== "object") return "—";
   const value = metadata as { enabled?: unknown; featureKey?: unknown };

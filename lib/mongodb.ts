@@ -22,3 +22,12 @@ function getClientPromise() {
 export async function getDatabase(): Promise<Db> {
   return (await getClientPromise()).db(process.env.MONGODB_DB || "receipt_issuer");
 }
+
+/**
+ * The shared client, for the rare caller that needs a session rather than a
+ * database handle — currently only the platform-admin audit writes, which pair
+ * a mutation with its audit record inside one transaction.
+ */
+export async function getMongoClient(): Promise<MongoClient> {
+  return getClientPromise();
+}
