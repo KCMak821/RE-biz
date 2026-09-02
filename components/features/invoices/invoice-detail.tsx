@@ -283,7 +283,7 @@ export function InvoiceDetail({ invoiceId }: { invoiceId: string }) {
                   <span className="payment-date">{formatDate(payment.paidAt)}</span>
                   <b className="payment-amount">{currencyAmount(currency, payment.amount)}</b>
                   <span className="payment-note">
-                    {payment.note || "—"}
+                    {[payment.paymentMethod, payment.reference, payment.note].filter(Boolean).join(" · ") || "—"}
                     {/* Who booked the money and when, so a colleague's entry is
                         never anonymous. */}
                     <small className="payment-meta">

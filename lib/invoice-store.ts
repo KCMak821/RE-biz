@@ -23,6 +23,9 @@ export type InvoicePaymentDocument = {
   createdByName?: string;
   note: string;
   paidAt: string;
+  /** Both absent on instalments recorded before the payment model gained them. */
+  paymentMethod?: string;
+  reference?: string;
 };
 
 export type InvoiceDocument = {
@@ -146,6 +149,8 @@ export function serializeInvoicePayments(invoice: Pick<InvoiceDocument, "payment
       id: payment._id.toHexString(),
       note: payment.note,
       paidAt: payment.paidAt,
+      paymentMethod: payment.paymentMethod ?? "",
+      reference: payment.reference ?? "",
     }));
 }
 
@@ -156,7 +161,9 @@ export function serializeInvoicePayments(invoice: Pick<InvoiceDocument, "payment
  */
 export function invoiceReceiptFields(invoice: InvoiceDocument & { _id: ObjectId }) {
   const payments = [...(invoice.payments ?? [])].sort((left, right) => left.paidAt.localeCompare(right.paidAt));
-  const methods = [...new Set(payments.map((payment) => payment.note.trim()).filter(Boolean))];
+  // What the receipt states is how the money arrived, not the team's private
+  // note about it. Older instalments have no method recorded, hence the fallback.
+  const methods = [...new Set(payments.map((payment) => (payment.paymentMethod ?? "").trim()).filter(Boolean))];
   return {
     amount: invoice.totalAmount,
     businessRegistration: invoice.companySnapshot.businessRegistration,

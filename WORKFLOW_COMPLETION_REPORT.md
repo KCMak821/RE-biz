@@ -79,7 +79,7 @@ draft:    ["sent"]    sent:     ["accepted", "rejected"]
 Payment record 沿用既有結構，只補上 audit：
 
 ```ts
-{ _id, amount, paidAt, note, createdBy, createdByName, createdAt }
+{ _id, amount, paidAt, paymentMethod, reference, note, createdBy, createdByName, createdAt }
 ```
 
 `createdByName` 是**寫入當下的 snapshot**，不是 join —— 成員改名或離開後，紀錄仍然說得出是誰登記的，讀一張請款單也不用再打一次 users collection。
@@ -112,7 +112,7 @@ collection.findOneAndUpdate({ ...inWorkspace, ...unchanged, status: invoice.stat
 
 `POST /api/invoices/[invoiceId]/receipt`，只在 `effectiveStatus === "paid"` 時可用。每個被拒絕的狀態都有自己的訊息（draft / void / partially_paid / unpaid），不是一句「操作失敗」。
 
-收據帶入 organization、customer、金額、付款方式（由 payment notes 組出）、`sourceInvoiceId`、`sourceInvoiceNumber`，並**繼承 invoice 的 `sourceQuoteId`**。開立日期用最後一筆付款的 `paidAt`——收據應該記錄錢實際到齊的那天。狀態直接是 `paid`：錢已經在了，沒有東西要再確認。
+收據帶入 organization、customer、金額、付款方式（由 payment 的 `paymentMethod` 組出）、`sourceInvoiceId`、`sourceInvoiceNumber`，並**繼承 invoice 的 `sourceQuoteId`**。開立日期用最後一筆付款的 `paidAt`——收據應該記錄錢實際到齊的那天。狀態直接是 `paid`：錢已經在了，沒有東西要再確認。
 
 ## 9. Quote → Receipt behavior
 
@@ -312,3 +312,120 @@ E2E 用真實 UI 再驗證一次：HKD 12,345 走完 owner→operator→owner，
 4. **歷史資料**：migration 發現 1 張報價單同時有 direct receipt 與 invoice（新規則之前建立）。收入仍只計一次，但這張報價單的 invoice 永遠無法開立收據（`sourceQuoteId` 已被佔用），會收到明確的 409 而非默默失敗。
 5. **MongoDB 為 standalone 部署**，沒有 multi-document transaction。所有跨文件的一致性都靠 unique index ＋ atomic update 達成（已用併發測試驗證）；`invoice.invoiceId` 這類反向指標的更新若在 insert 之後失敗，指標會缺漏 —— 但每一個讀取路徑都會 fallback 到 `sourceQuoteId` 查詢，所以功能不受影響。
 6. **文件編號 counter 在單據被刪除後不會回收**（既有行為，刻意保留：編號不應重複使用）。
+
+---
+
+# Concurrency Correctness Hotfix
+
+驗收發現三個 P1 race condition。共同的根因是同一種寫法：**先查一下，再寫**。三個都改成由單一 conditional write 決定勝負。
+
+## P1 #1 — Quote → Invoice vs Quote → Receipt（cross-collection XOR）
+
+兩個 endpoint 各自查另一個 collection 有沒有 downstream document，再 insert 自己的。同時送出時兩邊都查不到，兩邊都成功。既有的 unique index 只保證各 collection 內部不重複，**無法提供 cross-collection XOR**。
+
+修法：在 Quote document 上新增 `settlementPath?: "invoice" | "receipt"`，以單一 atomic claim 決定路線（`lib/quote-store.ts` 的 `claimSettlementPath`）：
+
+```ts
+findOneAndUpdate(
+  { _id, organizationId, settlementPath: { $exists: false }, status: "accepted" },
+  { $set: { settlementPath: path, updatedAt: new Date() } },
+)
+```
+
+claim 的結果分成四種，讓每個情境都有明確行為：
+
+| 結果 | 意義 | 行為 |
+| --- | --- | --- |
+| `claimed` | 這個 request 拿到路線 | 建立 downstream document |
+| `resumed` | 路線本來就是自己的，但上次沒建成 | **same-path retry**，繼續建立 |
+| `taken` | 另一條路線贏了 | 409，並指出實際走的是哪一份文件 |
+| `unavailable` | quote 已不是 accepted，或不在本工作區 | 409 / 404 |
+
+**claim 是 sticky 的**：downstream insert 失敗後可以重試同一條路線，但不能改走另一條——那正是要防的 race。若同一條路線有兩個 request 同時 resume，由原本的 partial unique index 收尾（`11000` 已有處理）。
+
+- **backward compatibility**：`20260904_quote-settlement-path.mjs` 依實際存在的 downstream document 回填 claim（invoice 優先），且只填空值、不覆寫。另外兩個 route 保留原本的 cross-collection 檢查作為 legacy 資料的第二層防護與友善訊息。
+- **cross-workspace**：claim filter 含 `organizationId`；外部工作區在載入 quote 時就 404，不會留下 claim（已測）。
+- **cross-user same workspace**：owner 建的 quote，operator 可以 claim 並完成（已測）。
+
+## P1 #2 — Invoice Payment vs Void
+
+Void 先讀 `payments.length`，但 update filter 只鎖 `status`。Payment 可以在 check 與 update 之間寫入，status 仍是 `sent`，於是有收款紀錄的 invoice 被 void。
+
+修法：void 的寫入條件加上讀取當下的完整快照。
+
+```ts
+const guard = action === "void"
+  ? { $or: [{ payments: { $exists: false } }, { payments: { $size: 0 } }], paymentStatus: "unpaid" }
+  : {};
+findOneAndUpdate({ _id, organizationId, status: invoice.status, ...guard }, { $set: next })
+```
+
+Payment 先落地 → void 的 `$size: 0` 不成立 → 409。Void 先落地 → payment 自己的 `status` guard 不成立 → 409。兩者必定只有一個贏。
+
+## P1 #3 — Quote accept vs reject
+
+Status update 的 filter 只有 `_id + organizationId`，兩個決定會互相覆寫，且原本在 miss 時還回 `200 { quote: null }`。
+
+修法：加上 optimistic guard `status: quote.status`，miss 時回 409 `報價單狀態已被其他人更新，請重新整理後再試。`
+
+## Payment semantic model
+
+`paymentMethod`（會印在收據上）、`reference`（銀行參考／支票號碼）、`note`（團隊內部備註，不印）三者分離。`invoiceReceiptFields` 改用 `paymentMethod` 推導收據付款方式，不再誤用 `note`。
+
+兩個新欄位都是 optional：舊 payment document 讀回為 `""`，由舊資料開立的收據 fallback 為「已收款」（已測）。
+
+---
+
+## Concurrency test results
+
+`test/integration/concurrency.test.mjs`，8 個測試。三個 P1 case 各對**全新文件重複 6 次**，避免單次沒有交錯就誤判通過。
+
+```text
+✔ a quote cannot be billed and receipted at the same time (12999ms)
+✔ a claimed route may be retried after a failed insert, and only that route (661ms)
+✔ quotes settled before the claim existed keep their route (555ms)
+✔ the settlement race respects roles and the tenant boundary (631ms)
+✔ a payment and a void cannot both land on one invoice (5742ms)
+✔ a quote cannot be accepted and rejected at the same time (2138ms)
+✔ a payment records how the money arrived, separately from the team's note (3752ms)
+✔ payments recorded before the model gained these fields still read back (422ms)
+ℹ tests 8   ℹ pass 8   ℹ fail 0
+```
+
+### 這些測試確實抓得到 bug
+
+通過本身不算證明——測試也可能只是沒踩到 race。因此把三個 guard 同時拿掉（claim filter 移除 `settlementPath: { $exists: false }`、void guard 改成 `{}`、status guard 移除 `status: quote.status`）再跑一次：
+
+```text
+✖ a quote cannot be billed and receipted at the same time
+  AssertionError: exactly one route must win — attempt 0: invoice=201 receipt=201
+✖ a claimed route may be retried after a failed insert, and only that route
+✖ a payment and a void cannot both land on one invoice
+  AssertionError: exactly one must win — attempt 1: payment=201 void=200
+✖ a quote cannot be accepted and rejected at the same time
+  AssertionError: exactly one decision must stick — attempt 0: accept=200 reject=200
+
+ℹ pass 4   ℹ fail 4
+```
+
+三個 P1 bug 都被原樣重現：`invoice=201 receipt=201`、`payment=201 void=200`、`accept=200 reject=200`。Guard 還原後 8/8 全數通過。
+
+注意 payment/void 是在 attempt 1 才踩中——單次執行會漏掉，重複 6 次的設計是必要的。
+
+## Hotfix verification
+
+| 指令 | 結果 |
+| --- | --- |
+| `npm run db:migrate` | exit 0；重跑 backfill 0 筆（idempotent） |
+| `npm run lint` | exit 0 |
+| `npm run typecheck` | exit 0 |
+| `npm test` | **54 pass / 0 fail**（新增 8） |
+| `npm run test:e2e` | **12 passed** |
+| `npm run build` | exit 0 |
+
+範圍：12 個檔案修改、2 個新增。沒有新功能，沒有 UI 重構——只有 `RecordPaymentDialog` 新增兩個對應欄位的輸入框，否則 `paymentMethod` 與 `reference` 永遠寫不進去。
+
+## Hotfix 後仍存在的取捨
+
+- **Claim 無法轉換路線**：若 invoice 已被 claim 但 insert 永久失敗（例如 counter 故障），該報價單無法改走收據路線。允許切換就會重新打開 race window，因此刻意不做；使用者的出路是「複製為新草稿」。
+- **文件編號在 claim 之後才產生**：輸掉 claim 的 request 不會浪費編號，但 insert 失敗仍會燒掉一個號碼（既有行為，編號不回收）。

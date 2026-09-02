@@ -16,8 +16,13 @@ export type InvoiceEffectiveStatus = "draft" | "unpaid" | "overdue" | "partially
  */
 export const invoicePaymentSchema = z.object({
   amount: z.coerce.number().finite().positive().max(999_999_999),
+  /** Free text for the team; never printed on a receipt. */
   note: z.string().trim().max(500).optional().default(""),
   paidAt: z.string().date(),
+  /** How the money arrived — this is what a receipt states. */
+  paymentMethod: z.string().trim().max(100).optional().default(""),
+  /** Bank reference, cheque number, transaction id. */
+  reference: z.string().trim().max(200).optional().default(""),
 }).strict();
 export type InvoicePaymentInput = z.infer<typeof invoicePaymentSchema>;
 

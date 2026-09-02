@@ -175,17 +175,26 @@ export async function PUT(
           { message: "有效期限已過，請先編輯有效期限再標示為已發送。" },
           { status: 409 },
         );
+      /* Guarded on the status this transition was validated against, so two
+         simultaneous decisions — accept and reject — cannot both apply. The
+         loser is told the quote moved rather than silently overwriting it. */
       const result = await (
         await quotesCollection()
       ).findOneAndUpdate(
         {
           _id: id,
           organizationId: new ObjectId(user.organization.id),
+          status: quote.status,
         },
         { $set: { status: statusRequest.data.status, updatedAt: new Date() } },
         { returnDocument: "after" },
       );
-      return Response.json({ quote: result ? serialize(result) : null });
+      return result
+        ? Response.json({ quote: serialize(result) })
+        : Response.json(
+            { message: "報價單狀態已被其他人更新，請重新整理後再試。" },
+            { status: 409 },
+          );
     }
     // A draft stays editable even once its validity date has passed — that is
     // precisely the edit the user needs to make before sending it.

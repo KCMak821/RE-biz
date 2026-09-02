@@ -4,7 +4,7 @@ import { canManageRecords, getCurrentUser } from "@/lib/auth";
 import { invoicesCollection } from "@/lib/invoice-store";
 import { canUseWorkspaceFeature } from "@/lib/platform-admin";
 import { quoteEffectiveStatus } from "@/lib/quotation";
-import { quotesCollection } from "@/lib/quote-store";
+import { claimSettlementPath, quotesCollection } from "@/lib/quote-store";
 import { nextReceiptNumbers, receiptsCollection, type ReceiptDocument } from "@/lib/receipt-store";
 
 export const runtime = "nodejs";
@@ -12,8 +12,12 @@ export const runtime = "nodejs";
 /**
  * The short path: an accepted quote paid on the spot, with no invoice in
  * between. The receipt starts as "待收款" and only becomes income once the money
- * is confirmed, which is what keeps this path and the invoice path from ever
- * describing the same trade twice.
+ * is confirmed.
+ *
+ * As with the invoice route, the mutual exclusion is decided by
+ * `claimSettlementPath` — a single conditional update on the quote — and the
+ * per-collection uniqueness by the partial index on
+ * `{ organizationId, sourceQuoteId }`. Neither is a read-then-write.
  */
 export async function POST(_: Request, { params }: { params: Promise<{ quoteId: string }> }) {
   const { quoteId } = await params;
@@ -41,10 +45,10 @@ export async function POST(_: Request, { params }: { params: Promise<{ quoteId: 
         { status: 409 },
       );
 
-    /* Once an invoice exists the trade is on the billing path, and its receipt
-       is issued from the invoice after payment. Allowing a second, quote-sourced
-       receipt here would recognise the same money as income twice. */
-    const invoice = await (await invoicesCollection()).findOne({ organizationId, sourceQuoteId: id });
+    const invoices = await invoicesCollection();
+    /* Quotes billed before the settlement path existed carry no claim, so the
+       invoice itself is still consulted for historical data. */
+    const invoice = await invoices.findOne({ organizationId, sourceQuoteId: id });
     if (invoice)
       return Response.json(
         {
@@ -53,6 +57,22 @@ export async function POST(_: Request, { params }: { params: Promise<{ quoteId: 
         },
         { status: 409 },
       );
+
+    const claim = await claimSettlementPath(organizationId, id, "receipt");
+    if (claim.kind === "unavailable")
+      return Response.json({ message: "報價單狀態已變更，請重新整理後再試。" }, { status: 409 });
+    if (claim.kind === "taken") {
+      const winner = await invoices.findOne({ organizationId, sourceQuoteId: id });
+      return Response.json(
+        {
+          message: winner
+            ? `此報價單已建立請款單 ${winner.invoiceNumber}，收據請在款項收妥後於請款單開立。`
+            : "此報價單已選擇走請款流程，收據請在款項收妥後於請款單開立。",
+          ...(winner ? { invoice: { id: winner._id.toHexString(), invoiceNumber: winner.invoiceNumber } } : {}),
+        },
+        { status: 409 },
+      );
+    }
 
     const [receiptNumber] = await nextReceiptNumbers(organizationId, [{ issueDate: new Date().toISOString().slice(0, 10) }]);
     const now = new Date();
@@ -86,6 +106,7 @@ export async function POST(_: Request, { params }: { params: Promise<{ quoteId: 
       return Response.json({ receipt: { id: result.insertedId.toHexString(), paymentStatus: "pending", receiptNumber } }, { status: 201 });
     } catch (error) {
       if (!(typeof error === "object" && error && "code" in error && error.code === 11000)) throw error;
+      // Two requests both held the receipt claim — the unique index picked one.
       const duplicate = await receipts.findOne({ organizationId, sourceQuoteId: id });
       if (!duplicate) throw error;
       await (await quotesCollection()).updateOne({ _id: id, organizationId }, { $set: { receiptId: duplicate._id, updatedAt: new Date() } });

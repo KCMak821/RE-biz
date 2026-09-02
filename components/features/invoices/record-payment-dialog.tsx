@@ -33,6 +33,8 @@ export function RecordPaymentDialog({
 }) {
   const [amount, setAmount] = useState("");
   const [paidAt, setPaidAt] = useState(TODAY);
+  const [paymentMethod, setPaymentMethod] = useState("");
+  const [reference, setReference] = useState("");
   const [note, setNote] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [message, setMessage] = useState("");
@@ -44,6 +46,8 @@ export function RecordPaymentDialog({
       // Pre-filled with everything still owed, which is the common case.
       setAmount(invoice.outstandingAmount > 0 ? String(invoice.outstandingAmount) : "");
       setPaidAt(TODAY);
+      setPaymentMethod("");
+      setReference("");
       setNote("");
       setErrors({});
       setMessage("");
@@ -67,7 +71,7 @@ export function RecordPaymentDialog({
     setMessage("");
     try {
       const data = await request<{ invoice: Invoice }>(`/api/invoices/${invoice.id}/payments`, {
-        body: JSON.stringify({ amount: value, note, paidAt }),
+        body: JSON.stringify({ amount: value, note, paidAt, paymentMethod, reference }),
         method: "POST",
       });
       notify.success(
@@ -134,11 +138,25 @@ export function RecordPaymentDialog({
               type="date"
               value={paidAt}
             />
+            <Field
+              hint="會印在之後開立的收據上。"
+              label="付款方式"
+              onChange={(event) => setPaymentMethod(event.target.value)}
+              placeholder="銀行轉帳"
+              value={paymentMethod}
+            />
+            <Field
+              hint="銀行參考編號、支票號碼或交易編號。"
+              label="參考編號"
+              onChange={(event) => setReference(event.target.value)}
+              placeholder="選填"
+              value={reference}
+            />
             <TextareaField
-              hint="例如：銀行轉帳、訂金、尾款。只有你的團隊看得到。"
+              hint="例如：訂金、尾款。只有你的團隊看得到，不會印在收據上。"
               label="備註"
               onChange={(event) => setNote(event.target.value)}
-              placeholder="銀行轉帳"
+              placeholder="訂金"
               rows={2}
               span
               value={note}

@@ -4,7 +4,7 @@ import { canManageRecords, getCurrentUser } from "@/lib/auth";
 import { invoicesCollection, nextInvoiceNumber, quoteInvoiceFields, type InvoiceDocument } from "@/lib/invoice-store";
 import { canUseWorkspaceFeature } from "@/lib/platform-admin";
 import { quoteEffectiveStatus } from "@/lib/quotation";
-import { quotesCollection } from "@/lib/quote-store";
+import { claimSettlementPath, quotesCollection } from "@/lib/quote-store";
 import { receiptsCollection } from "@/lib/receipt-store";
 
 export const runtime = "nodejs";
@@ -13,9 +13,11 @@ export const runtime = "nodejs";
  * Turns an accepted quote into a draft invoice, carrying every snapshot across
  * so nothing has to be typed twice.
  *
- * One quote yields at most one invoice — guaranteed by the partial unique index
- * on `{ organizationId, sourceQuoteId }`, not by the check below, so two
- * simultaneous clicks cannot both succeed.
+ * Two guarantees, both held by the database rather than by the checks below:
+ * `claimSettlementPath` decides atomically whether this trade is billed or
+ * receipted, and the partial unique index on `{ organizationId, sourceQuoteId }`
+ * stops a second invoice for the same quote. The reads before them exist only to
+ * produce a better message than a constraint violation would.
  */
 export async function POST(_: Request, { params }: { params: Promise<{ quoteId: string }> }) {
   const { quoteId } = await params;
@@ -43,10 +45,11 @@ export async function POST(_: Request, { params }: { params: Promise<{ quoteId: 
         { status: 409 },
       );
 
-    /* The two routes out of an accepted quote are alternatives, not stages: a
-       quote settled straight into a receipt has already been recognised as
-       income, so billing it again would describe the same money twice. */
-    const receipted = await (await receiptsCollection()).findOne({ organizationId, sourceQuoteId: id });
+    const receipts = await receiptsCollection();
+    /* Quotes settled before the settlement path existed carry no claim, so the
+       receipt itself is still consulted. New quotes are decided by the claim
+       below; this only keeps the message right for historical data. */
+    const receipted = await receipts.findOne({ organizationId, sourceQuoteId: id });
     if (receipted)
       return Response.json(
         {
@@ -55,6 +58,24 @@ export async function POST(_: Request, { params }: { params: Promise<{ quoteId: 
         },
         { status: 409 },
       );
+
+    /* The decisive step: one conditional update settles which of the two routes
+       this trade takes, so a simultaneous receipt request cannot also win. */
+    const claim = await claimSettlementPath(organizationId, id, "invoice");
+    if (claim.kind === "unavailable")
+      return Response.json({ message: "報價單狀態已變更，請重新整理後再試。" }, { status: 409 });
+    if (claim.kind === "taken") {
+      const winner = await receipts.findOne({ organizationId, sourceQuoteId: id });
+      return Response.json(
+        {
+          message: winner
+            ? `此報價單已直接建立收據 ${winner.receiptNumber}，不需要再開請款單。`
+            : "此報價單已選擇直接開立收據，不可再建立請款單。",
+          ...(winner ? { receipt: { id: winner._id.toHexString(), receiptNumber: winner.receiptNumber } } : {}),
+        },
+        { status: 409 },
+      );
+    }
 
     const now = new Date();
     const issueDate = now.toISOString().slice(0, 10);
@@ -81,6 +102,7 @@ export async function POST(_: Request, { params }: { params: Promise<{ quoteId: 
       return Response.json({ invoice: { id: result.insertedId.toHexString(), invoiceNumber: invoice.invoiceNumber } }, { status: 201 });
     } catch (error) {
       if (!(typeof error === "object" && error && "code" in error && error.code === 11000)) throw error;
+      // Two requests both held the invoice claim — the unique index picked one.
       const duplicate = await invoices.findOne({ organizationId, sourceQuoteId: id });
       if (!duplicate) throw error;
       await (await quotesCollection()).updateOne({ _id: id, organizationId }, { $set: { invoiceId: duplicate._id, updatedAt: new Date() } });

@@ -12,7 +12,7 @@
     "test": "node --test --test-concurrency=1 test/integration/*.test.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
-    "db:migrate": "node migrations/20260831_add-platform-admin.mjs && node migrations/20260831_customer-workspace-status.mjs && node migrations/20260902_organization-scoped-workspace-data.mjs && node migrations/20260903_document-relationship-indexes.mjs",
+    "db:migrate": "node migrations/20260831_add-platform-admin.mjs && node migrations/20260831_customer-workspace-status.mjs && node migrations/20260902_organization-scoped-workspace-data.mjs && node migrations/20260903_document-relationship-indexes.mjs && node migrations/20260904_quote-settlement-path.mjs",
     "db:grant-super-admin": "node scripts/grant-super-admin.mjs",
     "db:up": "docker compose up -d mongodb",
     "db:down": "docker compose down",

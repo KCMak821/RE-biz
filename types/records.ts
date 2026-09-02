@@ -89,6 +89,8 @@ export type InvoicePayment = {
   id: string;
   note: string;
   paidAt: string;
+  paymentMethod: string;
+  reference: string;
 };
 
 export type Invoice = {

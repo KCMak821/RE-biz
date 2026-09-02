@@ -55,6 +55,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ inv
       createdByName: user.name,
       note: parsed.data.note,
       paidAt: parsed.data.paidAt,
+      paymentMethod: parsed.data.paymentMethod,
+      reference: parsed.data.reference,
     };
     const paymentStatus = invoicePaymentStatusFor(alreadyPaid + parsed.data.amount, invoice.totalAmount);
 

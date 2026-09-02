@@ -32,6 +32,19 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ in
   try { const user = await getCurrentUser(); if (!user) return Response.json({ message: "請先登入。" }, { status: 401 }); if (!canManageRecords(user)) return Response.json({ message: "你的角色只有檢視權限，無法更新請款單。" }, { status: 403 }); if (!await permitted(user)) return Response.json({ message: "此工作區目前無法使用請款單功能。" }, { status: 403 }); const invoice = await inWorkspace(id, user); if (!invoice) return Response.json({ message: "請款單不存在。" }, { status: 404 }); const allowed = parsed.data.action === "send" ? invoice.status === "draft" : invoice.status === "draft" || invoice.status === "sent"; if (!allowed) return Response.json({ message: parsed.data.action === "send" ? "只有草稿狀態的請款單可標示為已發送。" : "已作廢的請款單不能再作廢。" }, { status: 409 });
     // Voiding an invoice says "never collect this". Money already booked against
     // it contradicts that, so the two are kept mutually exclusive.
-    if (parsed.data.action === "void" && (invoice.payments ?? []).length) return Response.json({ message: "已登記收款的請款單不可作廢，請先處理已收款項。" }, { status: 409 }); const next = parsed.data.action === "send" ? { status: "sent" as const, sentAt: new Date(), updatedAt: new Date() } : { status: "void" as const, updatedAt: new Date() }; const result = await (await invoicesCollection()).findOneAndUpdate({ _id: id, organizationId: new ObjectId(user.organization.id), status: invoice.status }, { $set: next }, { returnDocument: "after" }); return result ? Response.json({ invoice: serializeInvoice(result) }) : Response.json({ message: "請款單已被更新，請重新整理。" }, { status: 409 });
+    if (parsed.data.action === "void" && (invoice.payments ?? []).length) return Response.json({ message: "已登記收款的請款單不可作廢，請先處理已收款項。" }, { status: 409 });
+    const next = parsed.data.action === "send" ? { status: "sent" as const, sentAt: new Date(), updatedAt: new Date() } : { status: "void" as const, updatedAt: new Date() };
+    /* Voiding says "never collect this", so it may only land while nothing has
+       been collected. The check above read a snapshot; this guard makes the
+       write conditional on that same snapshot still holding, closing the window
+       in which a payment could arrive between the two. A payment recorded first
+       therefore loses this update, and a void applied first makes the payment's
+       own status guard fail — exactly one of the pair can win. */
+    const guard = parsed.data.action === "void"
+      ? { $or: [{ payments: { $exists: false } }, { payments: { $size: 0 } }], paymentStatus: "unpaid" as const }
+      : {};
+    const result = await (await invoicesCollection()).findOneAndUpdate({ _id: id, organizationId: new ObjectId(user.organization.id), status: invoice.status, ...guard }, { $set: next }, { returnDocument: "after" });
+    if (result) return Response.json({ invoice: serializeInvoice(result) });
+    return Response.json({ message: parsed.data.action === "void" ? "這張請款單剛剛被更新（可能已登記收款），不可作廢。請重新整理後確認。" : "請款單已被更新，請重新整理。" }, { status: 409 });
   } catch { return Response.json({ message: "無法更新請款單。" }, { status: 503 }); }
 }

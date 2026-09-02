@@ -36,6 +36,13 @@ export type QuoteDocument = {
   quoteNumber: string;
   receiptId?: ObjectId;
   invoiceId?: ObjectId;
+  /**
+   * Which of the two routes out of an accepted quote has been taken. Set once,
+   * atomically, and never cleared — it is the cross-collection lock that a
+   * unique index cannot provide, because the two downstream documents live in
+   * different collections.
+   */
+  settlementPath?: SettlementPath;
   status: Exclude<QuoteStatus, "expired">;
   terms: string;
   totalAmount: number;
@@ -43,6 +50,52 @@ export type QuoteDocument = {
   updatedAt: Date;
   validUntil: string;
 };
+
+/** An accepted quote is either billed or receipted — never both. */
+export type SettlementPath = "invoice" | "receipt";
+
+export type SettlementClaim =
+  /** This request took the route; carry on and create the document. */
+  | { kind: "claimed" }
+  /** The route was already ours, but nothing was created last time. Resume. */
+  | { kind: "resumed" }
+  /** The other route won. */
+  | { kind: "taken"; path: SettlementPath }
+  /** The quote changed underneath us, or never existed here. */
+  | { kind: "unavailable" };
+
+/**
+ * Takes the one settlement route a quote may follow, atomically.
+ *
+ * Checking "does the other collection already hold a document for this quote?"
+ * and then inserting cannot be made safe: two requests can both read nothing and
+ * both write. A single conditional update on the quote itself can, so the quote
+ * document is where the decision is recorded. Whoever flips the field wins; the
+ * loser is told which way the trade went.
+ *
+ * The claim is deliberately sticky. If the downstream insert then fails, the
+ * same route may be retried — `resumed` says so — but the trade cannot silently
+ * switch routes, which is the race this exists to close.
+ */
+export async function claimSettlementPath(
+  organizationId: ObjectId,
+  quoteId: ObjectId,
+  path: SettlementPath,
+): Promise<SettlementClaim> {
+  const quotes = await quotesCollection();
+  const claimed = await quotes.findOneAndUpdate(
+    { _id: quoteId, organizationId, settlementPath: { $exists: false }, status: "accepted" },
+    { $set: { settlementPath: path, updatedAt: new Date() } },
+    { returnDocument: "after" },
+  );
+  if (claimed) return { kind: "claimed" };
+
+  // The update matched nothing: either someone else claimed the quote first, or
+  // it is no longer in a state that can be settled at all.
+  const quote = await quotes.findOne({ _id: quoteId, organizationId });
+  if (!quote || quote.status !== "accepted") return { kind: "unavailable" };
+  return quote.settlementPath === path ? { kind: "resumed" } : { kind: "taken", path: quote.settlementPath ?? path };
+}
 
 type QuoteCounter = {
   createdAt: Date;
