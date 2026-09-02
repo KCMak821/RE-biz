@@ -14,9 +14,9 @@ export type StatusDescriptor = { label: string; tone: Tone; hint?: string };
 const quote: Record<string, StatusDescriptor> = {
   draft: { hint: "尚未發送給客戶，可以繼續編輯。", label: "草稿", tone: "neutral" },
   sent: { hint: "已送出，等待客戶回覆接受或拒絕。", label: "已發送", tone: "info" },
-  accepted: { hint: "客戶已接受，可以轉為請款單或建立收據草稿。", label: "已接受", tone: "success" },
+  accepted: { hint: "客戶已接受。可以轉為請款單，或直接開收據，兩者擇一。", label: "已接受", tone: "success" },
   rejected: { hint: "客戶已拒絕，這張報價單不會再往下走。", label: "已拒絕", tone: "danger" },
-  expired: { hint: "已過有效期限，不能再變更狀態或轉為請款單。", label: "已失效", tone: "warning" },
+  expired: { hint: "已發送但過了有效期限，不能再變更狀態。需要重新報價請複製為新草稿。", label: "已失效", tone: "warning" },
 };
 
 const invoice: Record<string, StatusDescriptor> = {

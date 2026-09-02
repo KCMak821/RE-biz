@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Banknote,
   BookOpenText,
   Clock,
   FileSignature,
@@ -120,12 +121,19 @@ export function DashboardView() {
   ).flatMap(([label, result]) => (result.kind === "failed" ? [{ label, message: result.message }] : []));
 
   const pendingReceipts = receipts.filter((receipt) => receipt.paymentStatus === "pending");
-  const awaitingQuotes = quotes.filter((quote) => quote.status === "sent");
-  const expiringQuotes = awaitingQuotes.filter((quote) => {
+  const sentQuotes = quotes.filter((quote) => quote.status === "sent");
+  const expiringQuotes = sentQuotes.filter((quote) => {
     const days = daysUntil(quote.validUntil, TODAY);
     return Number.isFinite(days) && days >= 0 && days <= EXPIRY_WINDOW_DAYS;
   });
-  const acceptedQuotes = quotes.filter((quote) => quote.status === "accepted" && !quote.invoiceId);
+  // A quote about to expire is already listed as such; listing it again under
+  // "waiting for a reply" would double-count the same piece of work.
+  const expiringIds = new Set(expiringQuotes.map((quote) => quote.id));
+  const awaitingQuotes = sentQuotes.filter((quote) => !expiringIds.has(quote.id));
+  // An accepted quote that went straight to a receipt is settled, not pending.
+  const acceptedQuotes = quotes.filter(
+    (quote) => quote.status === "accepted" && !quote.invoiceId && !quote.receiptId,
+  );
   const overdueInvoices = invoices.filter((invoice) => invoice.effectiveStatus === "overdue");
   const unpaidInvoices = invoices.filter((invoice) => invoice.effectiveStatus === "unpaid");
   const draftInvoices = invoices.filter((invoice) => invoice.effectiveStatus === "draft");
@@ -174,12 +182,12 @@ export function DashboardView() {
       title: "已接受的報價單可以請款",
       tone: "success" as const,
     },
-    draftInvoices.length && {
-      action: "查看草稿",
-      count: draftInvoices.length,
-      description: "還沒發送給客戶的請款單草稿。",
-      href: "/invoices?status=draft",
-      title: "請款單仍是草稿",
+    unpaidInvoices.length && {
+      action: "查看請款單",
+      count: unpaidInvoices.length,
+      description: "已發送、還在付款期限內。",
+      href: "/invoices?status=unpaid",
+      title: "請款單等待付款",
       tone: "info" as const,
     },
     awaitingQuotes.length && {
@@ -190,12 +198,12 @@ export function DashboardView() {
       title: "報價單等待客戶回覆",
       tone: "info" as const,
     },
-    unpaidInvoices.length && {
-      action: "查看請款單",
-      count: unpaidInvoices.length,
-      description: "已發送、還在付款期限內。",
-      href: "/invoices?status=unpaid",
-      title: "請款單等待付款",
+    draftInvoices.length && {
+      action: "查看草稿",
+      count: draftInvoices.length,
+      description: "還沒發送給客戶的請款單草稿。",
+      href: "/invoices?status=draft",
+      title: "請款單仍是草稿",
       tone: "info" as const,
     },
   ].filter(Boolean) as Array<{
@@ -232,6 +240,19 @@ export function DashboardView() {
       kind: "請款單",
       title: `${invoice.invoiceNumber} · ${invoice.customerSnapshot.companyName || invoice.customerSnapshot.name}`,
     })),
+    // Registering a payment is real work someone did, and it is the step that
+    // decides whether an invoice can be receipted — so it belongs in the feed
+    // even though it has no document of its own.
+    ...invoices.flatMap((invoice) =>
+      invoice.payments.map((payment) => ({
+        amount: payment.amount,
+        at: payment.createdAt,
+        href: `/invoices/${invoice.id}`,
+        icon: <Banknote aria-hidden="true" size={15} />,
+        kind: "收款",
+        title: `${invoice.invoiceNumber} · ${payment.createdByName || invoice.customerSnapshot.name}`,
+      })),
+    ),
     ...(ledger?.entries ?? [])
       .filter((entry) => entry.source === "manual")
       .map((entry) => ({
@@ -434,7 +455,7 @@ export function DashboardView() {
                 />
                 <p className="field-hint">{roleDescriptions[role]}</p>
                 <p className="field-hint" style={{ marginTop: 8 }}>
-                  收據、報價單、請款單與記帳資料以建立者為單位隔離，你看到的是自己建立的紀錄。
+                  收據、報價單、請款單與記帳資料屬於整個工作區，同事建立的文件你也看得到，並且可以接手處理。
                 </p>
               </Card>
             </div>

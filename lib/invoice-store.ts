@@ -14,6 +14,13 @@ export type InvoicePaymentDocument = {
   amount: number;
   createdAt: Date;
   createdBy: ObjectId;
+  /**
+   * Snapshot of who registered the instalment. Held on the payment rather than
+   * resolved through a join so the audit line survives a member being renamed
+   * or removed, and so reading an invoice never fans out to the users
+   * collection.
+   */
+  createdByName?: string;
   note: string;
   paidAt: string;
 };
@@ -134,10 +141,39 @@ export function serializeInvoicePayments(invoice: Pick<InvoiceDocument, "payment
     .map((payment) => ({
       amount: payment.amount,
       createdAt: payment.createdAt.toISOString(),
+      createdBy: payment.createdBy.toHexString(),
+      createdByName: payment.createdByName ?? "",
       id: payment._id.toHexString(),
       note: payment.note,
       paidAt: payment.paidAt,
     }));
+}
+
+/**
+ * The receipt fields implied by a fully paid invoice. The receipt is the point
+ * at which RE-Biz recognises income, so everything it needs is copied out of
+ * the invoice here rather than being looked up again later.
+ */
+export function invoiceReceiptFields(invoice: InvoiceDocument & { _id: ObjectId }) {
+  const payments = [...(invoice.payments ?? [])].sort((left, right) => left.paidAt.localeCompare(right.paidAt));
+  const methods = [...new Set(payments.map((payment) => payment.note.trim()).filter(Boolean))];
+  return {
+    amount: invoice.totalAmount,
+    businessRegistration: invoice.companySnapshot.businessRegistration,
+    description: invoice.lines.map((line) => line.name).join("；").slice(0, 2000) || "請款單項目",
+    // The receipt is dated when the money actually finished arriving.
+    issueDate: payments.at(-1)?.paidAt ?? new Date().toISOString().slice(0, 10),
+    issuerAddress: invoice.companySnapshot.address,
+    issuerContact: [invoice.companySnapshot.phone, invoice.companySnapshot.email].filter(Boolean).join(" · "),
+    issuerName: invoice.companySnapshot.name,
+    lineItems: invoice.lines,
+    notes: [invoice.notes, `來源請款單：${invoice.invoiceNumber}`].filter(Boolean).join("\n"),
+    payerAddress: invoice.customerSnapshot.address,
+    payerName: invoice.customerSnapshot.companyName || invoice.customerSnapshot.name,
+    paymentMethod: methods.join("、").slice(0, 100) || "已收款",
+    sourceInvoiceId: invoice._id,
+    sourceInvoiceNumber: invoice.invoiceNumber,
+  };
 }
 
 export function quoteInvoiceFields(quote: QuoteDocument) {

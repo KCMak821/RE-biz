@@ -226,7 +226,7 @@ export function QuoteDetail({ quoteId }: { quoteId: string }) {
         >
           客戶已接受
         </Button>
-      ) : quote.status === "accepted" && !links.invoice ? (
+      ) : quote.status === "accepted" && !links.invoice && !links.receipt ? (
         <Button
           icon={<FileText aria-hidden="true" size={16} />}
           onClick={() => void createInvoice()}
@@ -235,6 +235,14 @@ export function QuoteDetail({ quoteId }: { quoteId: string }) {
         >
           轉為請款單
         </Button>
+      ) : quote.status === "accepted" && !links.invoice && links.receipt ? (
+        <ButtonLink
+          href={`/receipts/${links.receipt.id}`}
+          icon={<ReceiptText aria-hidden="true" size={16} />}
+          variant="primary"
+        >
+          開啟收據 {links.receipt.receiptNumber}
+        </ButtonLink>
       ) : links.invoice ? (
         <ButtonLink href={`/invoices/${links.invoice.id}`} icon={<FileText aria-hidden="true" size={16} />} variant="primary">
           開啟請款單 {links.invoice.invoiceNumber}
@@ -269,7 +277,7 @@ export function QuoteDetail({ quoteId }: { quoteId: string }) {
                     <MenuItem icon={<Copy aria-hidden="true" size={15} />} onClick={() => void duplicate()}>
                       複製為新草稿
                     </MenuItem>
-                    {quote.status === "accepted" && !links.receipt ? (
+                    {quote.status === "accepted" && !links.receipt && !links.invoice ? (
                       <MenuItem
                         icon={<ReceiptText aria-hidden="true" size={15} />}
                         onClick={() => void createReceiptDraft()}
@@ -317,7 +325,7 @@ export function QuoteDetail({ quoteId }: { quoteId: string }) {
             </ButtonLink>
           ) : null}
           {links.receipt ? (
-            <ButtonLink href="/receipts" size="sm" variant="secondary">
+            <ButtonLink href={`/receipts/${links.receipt.id}`} size="sm" variant="secondary">
               收據 {links.receipt.receiptNumber}
               {links.receipt.paymentStatus === "paid" ? "（已收款）" : "（待收款）"}
             </ButtonLink>
@@ -343,10 +351,12 @@ function describeNextStep(quote: Quote, links: QuoteLinks, canManage: boolean, r
     return Number.isFinite(remaining) && remaining <= 7
       ? `等待客戶回覆中，${remaining >= 0 ? `還有 ${remaining} 天到期` : "已過期"}。可以主動聯絡客戶確認。`
       : "等待客戶回覆。收到答覆後標示為已接受，或在「更多」中標示為已拒絕。";
-  if (quote.status === "accepted" && !links.invoice)
-    return "客戶已接受。可以「轉為請款單」向客戶請款，或在「更多」中建立待收款的收據草稿。";
   if (quote.status === "accepted" && links.invoice)
-    return `已建立請款單 ${links.invoice.invoiceNumber}，接下來的付款追蹤在請款單上進行。`;
+    return `已建立請款單 ${links.invoice.invoiceNumber}，接下來的付款追蹤與收據都在請款單上進行。`;
+  if (quote.status === "accepted" && links.receipt)
+    return `已直接開立收據 ${links.receipt.receiptNumber}，這筆交易不需要再開請款單。`;
+  if (quote.status === "accepted")
+    return "客戶已接受。需要請款流程就「轉為請款單」；客戶當場付款則在「更多」中直接建立收據。兩條路只能擇一。";
   if (quote.status === "rejected") return "這張報價單已結束。需要重新報價時可以「複製為新草稿」調整價格。";
   if (quote.status === "expired") return "已過有效期限，不能再變更狀態。需要延期請「複製為新草稿」並設定新的有效期限。";
   return null;

@@ -83,6 +83,9 @@ export type InvoiceStatus = "draft" | "unpaid" | "overdue" | "partially_paid" | 
 export type InvoicePayment = {
   amount: number;
   createdAt: string;
+  createdBy: string;
+  /** Who registered it, snapshotted when the instalment was recorded. */
+  createdByName: string;
   id: string;
   note: string;
   paidAt: string;
@@ -114,6 +117,11 @@ export type Invoice = {
   totalDiscount: number;
 };
 
+/** Documents reachable from an invoice. Absent links are simply `null`. */
+export type InvoiceLinks = {
+  receipt: { id: string; paymentStatus: "pending" | "paid"; receiptNumber: string } | null;
+};
+
 export type ReceiptLineItem = {
   description: string;
   discountAmount: number;
@@ -141,6 +149,8 @@ export type SavedReceipt = {
   paymentStatus?: "pending" | "paid";
   receiptNumber: string;
   receiptTemplateSnapshot?: ReceiptTemplate;
+  sourceInvoiceId?: string;
+  sourceInvoiceNumber?: string;
   sourceQuoteId?: string;
   sourceQuoteNumber?: string;
 };

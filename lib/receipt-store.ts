@@ -23,6 +23,9 @@ export type ReceiptDocument = ReceiptInput & {
   paymentStatus: ReceiptPaymentStatus;
   /** The visual contract at the time the receipt was issued. */
   receiptTemplateSnapshot?: ReceiptTemplate;
+  /** Set when the receipt was issued from a fully paid invoice. */
+  sourceInvoiceId?: ObjectId;
+  sourceInvoiceNumber?: string;
   sourceQuoteId?: ObjectId;
   sourceQuoteNumber?: string;
   updatedAt: Date;
@@ -53,6 +56,8 @@ export function serializeReceipt(document: ReceiptDocument & { _id: ObjectId }) 
     paymentStatus: document.paymentStatus,
     receiptNumber: document.receiptNumber,
     receiptTemplateSnapshot: document.receiptTemplateSnapshot,
+    sourceInvoiceId: document.sourceInvoiceId?.toHexString(),
+    sourceInvoiceNumber: document.sourceInvoiceNumber,
     sourceQuoteId: document.sourceQuoteId?.toHexString(),
     sourceQuoteNumber: document.sourceQuoteNumber,
   };
@@ -69,6 +74,12 @@ export async function receiptsCollection() {
     collection.createIndex(
       { organizationId: 1, sourceQuoteId: 1 },
       { name: "receipt_source_quote_unique", partialFilterExpression: { sourceQuoteId: { $type: "objectId" } }, unique: true },
+    ),
+    // The same guarantee for the invoice path: one invoice can only ever be
+    // receipted once, so a payment can never be recognised as income twice.
+    collection.createIndex(
+      { organizationId: 1, sourceInvoiceId: 1 },
+      { name: "receipt_source_invoice_unique", partialFilterExpression: { sourceInvoiceId: { $type: "objectId" } }, unique: true },
     ),
   ]);
   return collection;

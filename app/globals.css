@@ -1227,6 +1227,8 @@ a { color: var(--forest); }
 .payment-date { color: var(--muted); font-size: 12.5px; }
 .payment-amount { color: var(--tone-success-fg); font-size: 14px; }
 .payment-note { overflow-wrap: anywhere; color: var(--ink-soft); font-size: 12.5px; }
+/* Who booked the instalment, kept quiet enough not to compete with the note. */
+.payment-meta { display: block; margin-top: 2px; color: var(--muted); font-size: 11.5px; }
 
 @media (max-width: 560px) {
   .payment-row { grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; }

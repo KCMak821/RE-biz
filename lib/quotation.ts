@@ -116,11 +116,22 @@ export function calculatedQuoteTotals(lines: QuoteLine[]) {
   };
 }
 
+/**
+ * Expiry belongs to a quote that is still waiting for an answer, so only a sent
+ * quote lapses. An accepted quote keeps its decision — and with it the ability
+ * to become an invoice or a receipt — however long the paperwork takes, and a
+ * rejected one stays rejected rather than being relabelled by the calendar.
+ */
 export function quoteEffectiveStatus(
   status: Exclude<QuoteStatus, "expired">,
   validUntil: string,
   now = new Date(),
 ): QuoteStatus {
-  const today = now.toISOString().slice(0, 10);
-  return validUntil < today ? "expired" : status;
+  if (status !== "sent") return status;
+  return quoteValidityLapsed(validUntil, now) ? "expired" : status;
+}
+
+/** True once a quote can no longer honestly be offered at the price it states. */
+export function quoteValidityLapsed(validUntil: string, now = new Date()) {
+  return validUntil < now.toISOString().slice(0, 10);
 }

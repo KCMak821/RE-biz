@@ -48,10 +48,17 @@ export async function GET(request: Request) {
     const today = new Date().toISOString().slice(0, 10);
     const baseFilter = { organizationId: new ObjectId(user.organization.id) };
     const filter: Record<string, unknown> = { ...baseFilter };
-    if (requestedStatus === "expired") filter.validUntil = { $lt: today };
-    else if (["draft", "sent", "accepted", "rejected"].includes(requestedStatus ?? "")) {
-      filter.status = requestedStatus;
+    // Only a quote still awaiting an answer lapses, so the expiry window is
+    // part of the sent filter and of nothing else — an accepted quote stays
+    // findable under "accepted" however old it is.
+    if (requestedStatus === "expired") {
+      filter.status = "sent";
+      filter.validUntil = { $lt: today };
+    } else if (requestedStatus === "sent") {
+      filter.status = "sent";
       filter.validUntil = { $gte: today };
+    } else if (["draft", "accepted", "rejected"].includes(requestedStatus ?? "")) {
+      filter.status = requestedStatus;
     }
     if (keyword) {
       const expression = keywordRegex(keyword);

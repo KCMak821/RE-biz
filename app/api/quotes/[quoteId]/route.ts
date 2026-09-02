@@ -7,6 +7,7 @@ import {
   calculatedQuoteTotals,
   quoteEffectiveStatus,
   quotePayloadSchema,
+  quoteValidityLapsed,
   type QuoteStatus,
 } from "@/lib/quotation";
 import { canUseWorkspaceFeature } from "@/lib/platform-admin";
@@ -151,9 +152,11 @@ export async function PUT(
     if (statusRequest.success) {
       if (quoteEffectiveStatus(quote.status, quote.validUntil) === "expired")
         return Response.json(
-          { message: "已失效的報價單不可變更狀態。" },
+          { message: "已失效的報價單不可變更狀態。需要重新報價請複製為新草稿。" },
           { status: 409 },
         );
+      // A quote is only ever draft → sent → accepted / rejected. Nothing comes
+      // back: reopening a decided quote is a copy, not a status change.
       const allowed: Record<QuoteDocument["status"], QuoteStatus[]> = {
         accepted: [],
         draft: ["sent"],
@@ -163,6 +166,13 @@ export async function PUT(
       if (!allowed[quote.status].includes(statusRequest.data.status))
         return Response.json(
           { message: "目前狀態不可進行此轉換。" },
+          { status: 409 },
+        );
+      // Sending a draft whose validity has already run out would produce a
+      // quote that is expired the moment the customer sees it.
+      if (statusRequest.data.status === "sent" && quoteValidityLapsed(quote.validUntil))
+        return Response.json(
+          { message: "有效期限已過，請先編輯有效期限再標示為已發送。" },
           { status: 409 },
         );
       const result = await (
@@ -177,10 +187,9 @@ export async function PUT(
       );
       return Response.json({ quote: result ? serialize(result) : null });
     }
-    if (
-      quote.status !== "draft" ||
-      quoteEffectiveStatus(quote.status, quote.validUntil) !== "draft"
-    )
+    // A draft stays editable even once its validity date has passed — that is
+    // precisely the edit the user needs to make before sending it.
+    if (quote.status !== "draft")
       return Response.json(
         { message: "只有草稿狀態的報價單可編輯。" },
         { status: 409 },

@@ -1,19 +1,26 @@
 import { expect, test } from "@playwright/test";
 
-import { confirmDialog, signIn } from "./helpers";
+import { confirmDialog, createQuote, signIn } from "./helpers";
 
 /**
- * Flow C — an accepted quote produces a pending receipt, confirming it turns the
- * receipt into income, and the ledger picks it up. This is the one place where
- * the two collections have to agree.
+ * Flow C — the short route: an accepted quote settled straight into a receipt,
+ * with no invoice in between. The receipt starts pending and only becomes income
+ * once the money is confirmed, which is the one place two collections have to
+ * agree.
+ *
+ * It builds its own quote rather than reusing flow A's: that one has been turned
+ * into an invoice, and a quote on the billing path deliberately no longer offers
+ * a direct receipt.
  */
-test("由報價單建立的收據確認收款後成為收支記帳的收入", async ({ page }) => {
+test("由報價單直接建立的收據，確認收款後成為收支記帳的收入", async ({ page }) => {
   await signIn(page);
 
-  // Flow A already left an accepted quote in place.
-  await page.goto("/quotes?status=accepted");
-  await page.locator(".dtable tbody tr a").first().click();
-  await expect(page).toHaveURL(/\/quotes\/[a-f\d]{24}$/);
+  await createQuote(page, { name: "即場付款服務", unitPrice: "6000" });
+
+  await page.getByRole("button", { name: "標示為已發送" }).click();
+  await confirmDialog(page, "標示為已發送");
+  await page.getByRole("button", { name: "客戶已接受" }).click();
+  await confirmDialog(page, "標示為已接受");
 
   await page.getByRole("button", { name: "更多操作" }).click();
   await page.getByRole("menuitem", { name: "建立收據草稿" }).click();
@@ -31,10 +38,11 @@ test("由報價單建立的收據確認收款後成為收支記帳的收入", as
   const receiptNumber = (await row.locator("strong").first().textContent())?.trim() ?? "";
   expect(receiptNumber).toMatch(/^RC-/);
 
-  // Confirm from the receipt's own detail page, which is new this round.
   await row.locator("a").first().click();
   await expect(page).toHaveURL(/\/receipts\/[a-f\d]{24}$/);
   await expect(page.locator(".page-title")).toHaveText(receiptNumber);
+  // The receipt knows where it came from, and the link works.
+  await expect(page.locator(".related-items")).toContainText("來源報價單");
 
   await page.getByRole("button", { name: "確認已收款" }).click();
   await confirmDialog(page, "確認已收款");

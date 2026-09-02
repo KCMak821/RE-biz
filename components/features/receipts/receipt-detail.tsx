@@ -1,6 +1,6 @@
 "use client";
 
-import { CircleCheck, FileDown, FileSignature } from "lucide-react";
+import { CircleCheck, FileDown, FileSignature, FileText } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 import { Button, ButtonLink } from "@/components/app/button";
@@ -15,7 +15,7 @@ import { NextStep, RelatedDocuments, SummaryList } from "@/components/app/surfac
 import { notify } from "@/components/app/toast";
 import { ReceiptPaper } from "@/components/features/receipts/receipt-paper";
 import { ApiError, request } from "@/lib/api";
-import { currencyAmount, fallback, formatDate } from "@/lib/format";
+import { currencyAmount, fallback, formatDate, formatDateTime } from "@/lib/format";
 import { help } from "@/lib/help-content";
 import { organizationLogoUrl, organizationSealUrl } from "@/lib/organization-assets";
 import { draftFromSavedReceipt } from "@/lib/receipt-form";
@@ -148,20 +148,33 @@ export function ReceiptDetail({ receiptId }: { receiptId: string }) {
           { label: "收款金額", value: currencyAmount(currency, receipt.amount) },
           { label: "付款方式", value: fallback(receipt.paymentMethod) },
           { label: "收款項目", value: fallback(receipt.description) },
+          { label: "建立時間", value: formatDateTime(receipt.createdAt) },
           { label: "備註", value: fallback(receipt.notes) },
         ]}
       />
 
-      {receipt.sourceQuoteId ? (
+      {receipt.sourceQuoteId || receipt.sourceInvoiceId ? (
         <RelatedDocuments>
-          <ButtonLink
-            href={`/quotes/${receipt.sourceQuoteId}`}
-            icon={<FileSignature aria-hidden="true" size={15} />}
-            size="sm"
-            variant="secondary"
-          >
-            來源報價單 {receipt.sourceQuoteNumber}
-          </ButtonLink>
+          {receipt.sourceInvoiceId ? (
+            <ButtonLink
+              href={`/invoices/${receipt.sourceInvoiceId}`}
+              icon={<FileText aria-hidden="true" size={15} />}
+              size="sm"
+              variant="secondary"
+            >
+              來源請款單 {receipt.sourceInvoiceNumber}
+            </ButtonLink>
+          ) : null}
+          {receipt.sourceQuoteId ? (
+            <ButtonLink
+              href={`/quotes/${receipt.sourceQuoteId}`}
+              icon={<FileSignature aria-hidden="true" size={15} />}
+              size="sm"
+              variant="secondary"
+            >
+              來源報價單 {receipt.sourceQuoteNumber}
+            </ButtonLink>
+          ) : null}
         </RelatedDocuments>
       ) : null}
 
@@ -170,7 +183,9 @@ export function ReceiptDetail({ receiptId }: { receiptId: string }) {
           ? "你的角色可以查看與下載這張收據，但不能確認收款。"
           : pending
             ? "這張收據由報價單建立，還沒收到款項。實際入帳後按「確認已收款」，金額就會列入收支記帳的收入。"
-            : "款項已收妥並列入收支記帳。需要再給客戶一份時，按「下載 PDF」即可。"}
+            : receipt.sourceInvoiceNumber
+              ? `款項已收妥並列入收支記帳，來源請款單 ${receipt.sourceInvoiceNumber}。需要再給客戶一份時，按「下載 PDF」即可。`
+              : "款項已收妥並列入收支記帳。需要再給客戶一份時，按「下載 PDF」即可。"}
       </NextStep>
 
       <div className="doc-frame print-keep">

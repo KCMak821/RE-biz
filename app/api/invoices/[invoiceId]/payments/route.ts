@@ -1,6 +1,7 @@
 import { ObjectId } from "mongodb";
 
 import { canManageRecords, getCurrentUser } from "@/lib/auth";
+import { currencyAmount } from "@/lib/format";
 import { invoicePaymentSchema, invoicePaymentStatusFor } from "@/lib/invoice";
 import { invoicePaidAmount, invoicesCollection, serializeInvoice, type InvoicePaymentDocument } from "@/lib/invoice-store";
 import { amountToCents } from "@/lib/money";
@@ -39,9 +40,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ inv
 
     const alreadyPaid = invoicePaidAmount(invoice);
     const outstandingCents = amountToCents(invoice.totalAmount) - amountToCents(alreadyPaid);
-    if (outstandingCents <= 0) return Response.json({ message: "這張請款單的款項已經全數收妥。" }, { status: 409 });
+    if (outstandingCents <= 0) return Response.json({ message: "已付款的請款單不能再登記收款。" }, { status: 409 });
     if (amountToCents(parsed.data.amount) > outstandingCents) {
-      return Response.json({ message: "收款金額大於尚未收款金額，請確認後再輸入。" }, { status: 409 });
+      const outstanding = currencyAmount(invoice.currency, invoice.totalAmount - alreadyPaid);
+      return Response.json({ message: `收款金額不可高於尚欠金額 ${outstanding}。` }, { status: 409 });
     }
 
     const now = new Date();
@@ -50,15 +52,24 @@ export async function POST(request: Request, { params }: { params: Promise<{ inv
       amount: parsed.data.amount,
       createdAt: now,
       createdBy: new ObjectId(user.id),
+      createdByName: user.name,
       note: parsed.data.note,
       paidAt: parsed.data.paidAt,
     };
     const paymentStatus = invoicePaymentStatusFor(alreadyPaid + parsed.data.amount, invoice.totalAmount);
 
-    // Guarded on the payment total that was just read, so two concurrent
-    // requests cannot both pass the overpayment check.
+    /* The overpayment check above was made against a snapshot, so the write is
+       guarded on that exact snapshot: the invoice must still be in the same
+       status and still hold precisely the payments that were counted. Two
+       concurrent instalments therefore cannot both be applied — the loser is
+       told to reload and re-check what is still outstanding. `$size` is exact,
+       so this holds even when both instalments would individually fit. */
+    const recorded = (invoice.payments ?? []).length;
+    const unchanged = recorded === 0
+      ? { $or: [{ payments: { $exists: false } }, { payments: { $size: 0 } }] }
+      : { payments: { $size: recorded } };
     const result = await collection.findOneAndUpdate(
-      { ...inWorkspace, status: invoice.status, paymentStatus: invoice.paymentStatus },
+      { ...inWorkspace, ...unchanged, status: invoice.status },
       { $push: { payments: payment }, $set: { paymentStatus, updatedAt: now } },
       { returnDocument: "after" },
     );

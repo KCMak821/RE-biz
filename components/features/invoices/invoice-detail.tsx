@@ -1,6 +1,6 @@
 "use client";
 
-import { Ban, Banknote, FileDown, Pencil, Send } from "lucide-react";
+import { Ban, Banknote, FileDown, Pencil, ReceiptText, Send } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 import { Button, ButtonLink } from "@/components/app/button";
@@ -16,9 +16,9 @@ import { notify } from "@/components/app/toast";
 import { InvoicePaper } from "@/components/features/invoices/invoice-paper";
 import { RecordPaymentDialog } from "@/components/features/invoices/record-payment-dialog";
 import { ApiError, request } from "@/lib/api";
-import { currencyAmount, daysUntil, formatDate, today } from "@/lib/format";
+import { currencyAmount, daysUntil, formatDate, formatDateTime, today } from "@/lib/format";
 import { help } from "@/lib/help-content";
-import type { Invoice } from "@/types/records";
+import type { Invoice, InvoiceLinks } from "@/types/records";
 
 const TODAY = today();
 
@@ -27,6 +27,7 @@ export function InvoiceDetail({ invoiceId }: { invoiceId: string }) {
   const confirm = useConfirm();
 
   const [invoice, setInvoice] = useState<Invoice | null>(null);
+  const [links, setLinks] = useState<InvoiceLinks>({ receipt: null });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [blocked, setBlocked] = useState<string | null>(null);
@@ -36,8 +37,11 @@ export function InvoiceDetail({ invoiceId }: { invoiceId: string }) {
   const load = useCallback(() => {
     setLoading(true);
     setError("");
-    void request<{ invoice: Invoice }>(`/api/invoices/${invoiceId}`)
-      .then((data) => setInvoice(data.invoice))
+    void request<{ invoice: Invoice } & InvoiceLinks>(`/api/invoices/${invoiceId}`)
+      .then((data) => {
+        setInvoice(data.invoice);
+        setLinks({ receipt: data.receipt });
+      })
       .catch((failure: unknown) => {
         if (failure instanceof ApiError && failure.isForbidden) setBlocked(failure.message);
         else setError(failure instanceof Error ? failure.message : "無法讀取這張請款單。");
@@ -83,6 +87,31 @@ export function InvoiceDetail({ invoiceId }: { invoiceId: string }) {
       );
     } catch (failure) {
       notify.error("無法更新請款單", failure instanceof Error ? failure.message : undefined);
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  /** Issues the receipt for a settled invoice — the point income is recognised. */
+  async function createReceipt() {
+    if (!invoice) return;
+    const proceed = await confirm({
+      confirmLabel: "開立收據",
+      consequence: `會依這張請款單開立一張已收款的收據，金額 ${currencyAmount(currency, invoice.totalAmount)}，並列入「收支記帳」的收入。每張請款單只能開立一次。`,
+      title: `要為 ${invoice.invoiceNumber} 開立收據嗎？`,
+    });
+    if (!proceed) return;
+
+    setWorking(true);
+    try {
+      const data = await request<{ receipt: { id: string; receiptNumber: string } }>(
+        `/api/invoices/${invoice.id}/receipt`,
+        { method: "POST" },
+      );
+      notify.success(`已開立收據 ${data.receipt.receiptNumber}`, "這筆款項已列入收支記帳的收入。");
+      load();
+    } catch (failure) {
+      notify.error("無法開立收據", failure instanceof Error ? failure.message : undefined);
     } finally {
       setWorking(false);
     }
@@ -148,6 +177,23 @@ export function InvoiceDetail({ invoiceId }: { invoiceId: string }) {
       >
         登記收款
       </Button>
+    ) : links.receipt ? (
+      <ButtonLink
+        href={`/receipts/${links.receipt.id}`}
+        icon={<ReceiptText aria-hidden="true" size={16} />}
+        variant="primary"
+      >
+        查看收據 {links.receipt.receiptNumber}
+      </ButtonLink>
+    ) : canManageRecords && invoice.effectiveStatus === "paid" ? (
+      <Button
+        icon={<ReceiptText aria-hidden="true" size={16} />}
+        onClick={() => void createReceipt()}
+        pending={working}
+        variant="primary"
+      >
+        開立收據
+      </Button>
     ) : null;
 
   return (
@@ -171,7 +217,7 @@ export function InvoiceDetail({ invoiceId }: { invoiceId: string }) {
                 編輯
               </ButtonLink>
             ) : null}
-            {canManageRecords && invoice.status !== "void" ? (
+            {canManageRecords && invoice.status !== "void" && !invoice.payments.length ? (
               <RowActions
                 menu={
                   <MenuItem danger icon={<Ban aria-hidden="true" size={15} />} onClick={() => void act("void")}>
@@ -211,15 +257,22 @@ export function InvoiceDetail({ invoiceId }: { invoiceId: string }) {
         ]}
       />
 
-      {invoice.sourceQuoteId ? (
+      {invoice.sourceQuoteId || links.receipt ? (
         <RelatedDocuments>
-          <ButtonLink href={`/quotes/${invoice.sourceQuoteId}`} size="sm" variant="secondary">
-            來源報價單 {invoice.sourceQuoteNumber}
-          </ButtonLink>
+          {invoice.sourceQuoteId ? (
+            <ButtonLink href={`/quotes/${invoice.sourceQuoteId}`} size="sm" variant="secondary">
+              來源報價單 {invoice.sourceQuoteNumber}
+            </ButtonLink>
+          ) : null}
+          {links.receipt ? (
+            <ButtonLink href={`/receipts/${links.receipt.id}`} size="sm" variant="secondary">
+              收據 {links.receipt.receiptNumber}
+            </ButtonLink>
+          ) : null}
         </RelatedDocuments>
       ) : null}
 
-      <NextStep>{describeNextStep(invoice, canManageRecords, remaining)}</NextStep>
+      <NextStep>{describeNextStep(invoice, canManageRecords, remaining, Boolean(links.receipt))}</NextStep>
 
       {invoice.payments.length ? (
         <div className="no-print" style={{ marginBottom: 18 }}>
@@ -229,7 +282,15 @@ export function InvoiceDetail({ invoiceId }: { invoiceId: string }) {
                 <li className="payment-row" key={payment.id}>
                   <span className="payment-date">{formatDate(payment.paidAt)}</span>
                   <b className="payment-amount">{currencyAmount(currency, payment.amount)}</b>
-                  <span className="payment-note">{payment.note || "—"}</span>
+                  <span className="payment-note">
+                    {payment.note || "—"}
+                    {/* Who booked the money and when, so a colleague's entry is
+                        never anonymous. */}
+                    <small className="payment-meta">
+                      {payment.createdByName ? `${payment.createdByName} 登記於 ` : "登記於 "}
+                      {formatDateTime(payment.createdAt)}
+                    </small>
+                  </span>
                 </li>
               ))}
             </ul>
@@ -256,7 +317,7 @@ export function InvoiceDetail({ invoiceId }: { invoiceId: string }) {
   );
 }
 
-function describeNextStep(invoice: Invoice, canManage: boolean, remaining: number) {
+function describeNextStep(invoice: Invoice, canManage: boolean, remaining: number, receipted: boolean) {
   if (!canManage) return "你的角色可以查看與下載這張請款單，但不能變更狀態。";
   switch (invoice.effectiveStatus) {
     case "draft":
@@ -268,7 +329,9 @@ function describeNextStep(invoice: Invoice, canManage: boolean, remaining: numbe
     case "partially_paid":
       return "已收到部分款項。收到後續款項時再按「登記收款」，全數收妥後狀態會自動變成已付款。";
     case "paid":
-      return "款項已全數收到。如果客戶需要收據，可以到「收據」開立一張。";
+      return receipted
+        ? "款項已全數收到，收據也已開立並列入收入。"
+        : "款項已全數收到。按「開立收據」產生收據，這筆金額就會列入收支記帳的收入。";
     case "void":
       return "這張請款單已作廢，只保留紀錄。需要重新請款請建立一張新的。";
     default:
