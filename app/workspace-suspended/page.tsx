@@ -3,7 +3,6 @@ import { redirect } from "next/navigation";
 
 import { AuthBrand } from "@/components/features/auth/auth-brand";
 import { SignOutButton } from "@/components/features/auth/sign-out-button";
-import { ButtonLink } from "@/components/app/button";
 import { getCurrentUser } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
@@ -26,13 +25,6 @@ export default async function WorkspaceSuspendedPage() {
           </p>
         </div>
         <p className="auth-status">請聯絡平台管理者了解原因並申請重新啟用。</p>
-        {user.platformRole === "SUPER_ADMIN" ? (
-          <div className="auth-form" style={{ marginTop: 18 }}>
-            <ButtonLink block href="/admin/workspaces" variant="primary">
-              前往平台管理處理
-            </ButtonLink>
-          </div>
-        ) : null}
         <p className="auth-alt">
           <SignOutButton />
         </p>

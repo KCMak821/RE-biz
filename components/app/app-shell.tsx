@@ -19,14 +19,14 @@ import { roleLabel } from "@/lib/status";
  * gets a drawer plus the name of the page you are on.
  */
 export function AppShell({ children }: { children: ReactNode }) {
-  const { canManageSettings, features, isSuperAdmin, organization, role, user } = useWorkspace();
+  const { canManageSettings, features, organization, role, user } = useWorkspace();
   const pathname = usePathname();
   const router = useRouter();
   const { confirmDiscard } = useGuardedNavigation();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const drawer = useRef<HTMLDialogElement>(null);
-  const groups = visibleNavigation({ canManageSettings, features, isSuperAdmin });
+  const groups = visibleNavigation({ canManageSettings, features });
   const current = navItemFor(pathname);
 
   useEffect(() => {

@@ -99,12 +99,6 @@ export function roleLabel(role: string | undefined | null) {
   return roleLabels[role as keyof typeof roleLabels] ?? role ?? "—";
 }
 
-export const platformRoleLabels = { SUPER_ADMIN: "平台管理者", USER: "一般使用者" } as const;
-
-export function platformRoleLabel(role: string | undefined | null) {
-  return platformRoleLabels[role as keyof typeof platformRoleLabels] ?? role ?? "—";
-}
-
 export const featureLabels = {
   accounting: "收支記帳",
   invoices: "請款單",

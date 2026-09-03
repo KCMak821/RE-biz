@@ -26,31 +26,34 @@
 - `npm run db:up`：啟動本機 MongoDB
 - `npm run db:down`：停止本機 MongoDB（保留資料）
 - `npm run db:migrate`：套用資料庫 migration
-- `npm run db:grant-super-admin -- <email>`：授予平台管理者權限（需要 `MONGODB_URI`）
+- `npm run admin:create -- <email> "<名字>"`：建立平台管理者
 
 ## 平台管理後台（/admin）
 
-`/admin` 是跨公司的平台管理後台，只有 `platformRole` 為 `SUPER_ADMIN` 的帳號能進入。
-這個權限與公司內的成員角色（owner／admin／operator／viewer）完全分開：公司的 owner
-**不會**因此取得後台權限。
+`/admin` 是經營 RE-Biz 的人用的後台，跟客戶使用的產品**完全分開**：
 
-阻擋在伺服器端完成——`app/admin/layout.tsx` 這個 server component 會將非管理者導回首頁，
-每一支 `/api/admin/*` 也各自檢查並回傳 403，因此直接輸入網址無法繞過。
+- **不同身分**：管理者存在 `platformAdmins`，不是 `users`。管理者不隸屬任何公司，
+  不會出現在 `/admin/users` 的客戶清單，也不計入平台統計。客戶帳號無論什麼角色，
+  都不可能取得後台權限。
+- **不同登入與 cookie**：客戶用 `/login`（`receipt_session`，30 天）；管理者用
+  `/admin/login`（`rebiz_admin_session`，8 小時）。產品端就算外洩 session，
+  也開不了後台；反之管理者的 cookie 也存取不了任何客戶資料。
 
-### 授予第一個平台管理者
+阻擋在伺服器端完成——`app/admin/(console)/layout.tsx` 這個 server component 會把
+未登入者導向 `/admin/login`，每一支 `/api/admin/*` 也各自檢查並回傳 403，
+因此直接輸入網址無法繞過。
 
-全新的資料庫沒有任何 `SUPER_ADMIN`，因此 `/admin` 一開始對所有人都會導回首頁。
-先註冊一個一般帳號，再授予權限。這些指令碼不會讀取 `.env.local`，所以要自己帶入
-`MONGODB_URI`（`npm run db:migrate` 也一樣）：
+### 建立第一個平台管理者
+
+全新的資料庫沒有任何管理者，所以 `/admin` 一開始對所有人關閉。這些指令碼會自己讀
+`.env.local`，不需要設定環境變數：
 
 ```
-MONGODB_URI=mongodb://127.0.0.1:27018 npm run db:grant-super-admin -- you@example.com
+npm run admin:create -- you@example.com "你的名字"
 ```
 
-該帳號需要重新登入，側邊欄「設定」下才會出現「平台管理」入口。
-
-`.env.example` 裡的 `SUPER_ADMIN_EMAILS` 只在 `npm run db:migrate` **第一次**執行時生效；
-migration 一旦記錄在 `schemaMigrations` 就不會再跑，之後請改用上面的指令。
+密碼在終端機輸入時不會顯示，也不會進入指令列或 shell history。建立後到
+`/admin/login` 登入。
 
 ## 部署
 

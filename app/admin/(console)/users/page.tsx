@@ -8,7 +8,7 @@ import { StatusBadge } from "@/components/app/status-badge";
 import { UserStatusButton } from "@/components/admin/user-status-button";
 import { formatDate } from "@/lib/format";
 import { listAdminUsers } from "@/lib/platform-admin";
-import { platformRoleLabel, roleLabel } from "@/lib/status";
+import { roleLabel } from "@/lib/status";
 
 export const metadata: Metadata = { title: "使用者｜RE-Biz 平台管理" };
 
@@ -19,7 +19,7 @@ export default async function UsersPage() {
     <div className="page page-wide">
       <PageHeader
         crumbs={[{ href: "/admin", label: "平台管理" }, { label: "使用者" }]}
-        description="平台上的每個帳號一列，含所屬公司數與平台角色。停用帳號只會阻止登入，既有資料與紀錄都會保留。"
+        description="平台上的每個客戶帳號一列，含所屬公司數。平台管理者不是客戶帳號，不會出現在這裡。停用帳號只會阻止登入，既有資料與紀錄都會保留。"
         title="使用者"
       />
       <ListCard footer={users.length ? `共 ${users.length} 個帳號。` : undefined}>
@@ -32,7 +32,6 @@ export default async function UsersPage() {
                   <th>電子郵件</th>
                   <th className="is-end">所屬公司數</th>
                   <th>所屬公司</th>
-                  <th>平台角色</th>
                   <th>登入狀態</th>
                   <th>建立日期</th>
                   <th className="is-end">操作</th>
@@ -58,7 +57,6 @@ export default async function UsersPage() {
                           ))
                         : "—"}
                     </td>
-                    <td>{platformRoleLabel(user.platformRole)}</td>
                     <td>
                       <StatusBadge domain="account" value={user.accountStatus} />
                     </td>

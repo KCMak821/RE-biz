@@ -103,12 +103,21 @@ async function waitFor(check, timeoutMs = 60_000) {
   return false;
 }
 
-async function request(path, { body, method = "GET", token } = {}) {
+/**
+  * `token` is a customer session; `adminToken` is a platform administrator's.
+  * They are different cookies backed by different collections, which is the
+  * whole point: neither can stand in for the other.
+  */
+async function request(path, { adminToken, body, method = "GET", token } = {}) {
+  const cookies = [
+    token ? `receipt_session=${token}` : null,
+    adminToken ? `rebiz_admin_session=${adminToken}` : null,
+  ].filter(Boolean);
   const response = await fetch(`${baseUrl}${path}`, {
     body: body ? JSON.stringify(body) : undefined,
     headers: {
       ...(body ? { "content-type": "application/json" } : {}),
-      ...(token ? { cookie: `receipt_session=${token}` } : {}),
+      ...(cookies.length ? { cookie: cookies.join("; ") } : {}),
     },
     method,
   });
@@ -125,25 +134,36 @@ async function createSession(userId) {
   return token;
 }
 
+async function createAdminSession(adminId) {
+  const token = randomBytes(32).toString("base64url");
+  await database.collection("platformAdminSessions").insertOne({
+    adminId,
+    expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+    tokenHash: sessionHash(token),
+  });
+  return token;
+}
+
 async function seedFixtures() {
   const now = new Date();
-  const superAdminId = new ObjectId();
+  const platformAdminId = new ObjectId();
   const userAId = new ObjectId();
   const userBId = new ObjectId();
   const disabledUserId = new ObjectId();
   const workspaceAId = new ObjectId();
   const workspaceBId = new ObjectId();
   const receiptBId = new ObjectId();
+  // Platform administrators are their own collection. Nothing here makes an
+  // administrator a customer, and no customer row can grant platform access.
+  await database.collection("platformAdmins").insertOne({
+    _id: platformAdminId,
+    createdAt: now,
+    email: "platform-admin@rebiz.test",
+    name: "Platform Admin",
+    passwordHash: "not-used-by-session-tests",
+    status: "active",
+  });
   await database.collection("users").insertMany([
-    {
-      _id: superAdminId,
-      accountStatus: "active",
-      createdAt: now,
-      email: "super-admin@example.test",
-      name: "Super Admin",
-      passwordHash: "not-used-by-session-tests",
-      platformRole: "SUPER_ADMIN",
-    },
     {
       _id: userAId,
       accountStatus: "active",
@@ -151,7 +171,6 @@ async function seedFixtures() {
       email: "user-a@example.test",
       name: "User A",
       passwordHash: "not-used-by-session-tests",
-      platformRole: "USER",
     },
     {
       _id: userBId,
@@ -160,7 +179,6 @@ async function seedFixtures() {
       email: "user-b@example.test",
       name: "User B",
       passwordHash: "not-used-by-session-tests",
-      platformRole: "USER",
     },
     {
       _id: disabledUserId,
@@ -169,7 +187,6 @@ async function seedFixtures() {
       email: "disabled@example.test",
       name: "Disabled User",
       passwordHash: "not-used-by-session-tests",
-      platformRole: "USER",
     },
   ]);
   await database.collection("organizations").insertMany([
@@ -231,8 +248,9 @@ async function seedFixtures() {
     updatedAt: now,
   });
   return {
+    adminToken: await createAdminSession(platformAdminId),
+    platformAdminId,
     receiptBId,
-    superAdminToken: await createSession(superAdminId),
     userAToken: await createSession(userAId),
     disabledUserId,
     disabledUserToken: await createSession(disabledUserId),
@@ -345,7 +363,7 @@ test(
   { concurrency: false },
   async () => {
     const result = await request("/api/admin/workspaces", {
-      token: fixture.superAdminToken,
+      adminToken: fixture.adminToken,
     });
     assert.equal(result.response.status, 200);
     assert.ok(
@@ -502,9 +520,13 @@ const adminPagePaths = [
   "/admin/audit-logs",
 ];
 
-async function requestPage(path, token) {
+async function requestPage(path, { adminToken, token } = {}) {
+  const cookies = [
+    token ? `receipt_session=${token}` : null,
+    adminToken ? `rebiz_admin_session=${adminToken}` : null,
+  ].filter(Boolean);
   return fetch(`${baseUrl}${path}`, {
-    headers: token ? { cookie: `receipt_session=${token}` } : {},
+    headers: cookies.length ? { cookie: cookies.join("; ") } : {},
     redirect: "manual",
   });
 }
@@ -517,7 +539,7 @@ test(
       ...adminPagePaths,
       `/admin/workspaces/${fixture.workspaceAId}`,
     ]) {
-      const response = await requestPage(path, fixture.superAdminToken);
+      const response = await requestPage(path, { adminToken: fixture.adminToken });
       assert.equal(response.status, 200, `expected 200 for ${path}`);
     }
   },
@@ -533,14 +555,14 @@ test(
     ]) {
       // The guard is a redirect from the server component, so a normal user
       // never receives the page markup — hiding the link is not what stops them.
-      const response = await requestPage(path, fixture.userAToken);
+      const response = await requestPage(path, { token: fixture.userAToken });
       assert.ok(
         [302, 303, 307, 308].includes(response.status),
         `expected a redirect for ${path}, got ${response.status}`,
       );
       assert.equal(
         new URL(response.headers.get("location"), baseUrl).pathname,
-        "/",
+        "/admin/login",
       );
     }
   },
@@ -565,10 +587,10 @@ test(
   { concurrency: false },
   async () => {
     const a = await request(`/api/admin/workspaces/${fixture.workspaceAId}`, {
-      token: fixture.superAdminToken,
+      adminToken: fixture.adminToken,
     });
     const b = await request(`/api/admin/workspaces/${fixture.workspaceBId}`, {
-      token: fixture.superAdminToken,
+      adminToken: fixture.adminToken,
     });
     assert.equal(a.response.status, 200);
     assert.equal(b.response.status, 200);
@@ -593,7 +615,7 @@ test(
       {
         body: { status: "suspended" },
         method: "PATCH",
-        token: fixture.superAdminToken,
+        adminToken: fixture.adminToken,
       },
     );
     assert.equal(suspend.response.status, 200);
@@ -602,7 +624,7 @@ test(
       token: fixture.userAToken,
     });
     assert.equal(whileSuspended.response.status, 403);
-    const page = await requestPage("/dashboard", fixture.userAToken);
+    const page = await requestPage("/dashboard", { token: fixture.userAToken });
     assert.equal(
       new URL(page.headers.get("location"), baseUrl).pathname,
       "/workspace-suspended",
@@ -613,7 +635,7 @@ test(
       {
         body: { status: "active" },
         method: "PATCH",
-        token: fixture.superAdminToken,
+        adminToken: fixture.adminToken,
       },
     );
     assert.equal(reactivate.response.status, 200);
@@ -635,7 +657,7 @@ test(
       {
         body: { enabled: false },
         method: "PATCH",
-        token: fixture.superAdminToken,
+        adminToken: fixture.adminToken,
       },
     );
     const whileDisabled = await request("/api/receipts", {
@@ -647,12 +669,12 @@ test(
       {
         body: { enabled: true },
         method: "PATCH",
-        token: fixture.superAdminToken,
+        adminToken: fixture.adminToken,
       },
     );
 
     const logs = await request("/api/admin/audit-logs", {
-      token: fixture.superAdminToken,
+      adminToken: fixture.adminToken,
     });
     assert.equal(logs.response.status, 200);
     const actionsForA = logs.body.auditLogs
@@ -675,7 +697,7 @@ test(
     );
     assert.equal(featureLog.metadata.featureKey, "receipts");
     assert.equal(featureLog.metadata.enabled, false);
-    assert.equal(featureLog.actor.email, "super-admin@example.test");
+    assert.equal(featureLog.actor.email, "platform-admin@rebiz.test");
   },
 );
 
@@ -685,7 +707,7 @@ test(
   async () => {
     const filtered = await request(
       `/api/admin/audit-logs?workspaceId=${fixture.workspaceAId}`,
-      { token: fixture.superAdminToken },
+      { adminToken: fixture.adminToken },
     );
     assert.equal(filtered.response.status, 200);
     assert.ok(filtered.body.auditLogs.length > 0);
@@ -699,7 +721,7 @@ test(
     // A date window in the past matches nothing that was just written.
     const outOfRange = await request(
       "/api/admin/audit-logs?from=2000-01-01&to=2000-01-02",
-      { token: fixture.superAdminToken },
+      { adminToken: fixture.adminToken },
     );
     assert.equal(outOfRange.body.auditLogs.length, 0);
   },
@@ -722,11 +744,11 @@ test(
 );
 
 test(
-  "the platform user list reports one row per person with a workspace count",
+  "the platform user list is customers only, one row per person",
   { concurrency: false },
   async () => {
     const result = await request("/api/admin/users", {
-      token: fixture.superAdminToken,
+      adminToken: fixture.adminToken,
     });
     assert.equal(result.response.status, 200);
     const ids = result.body.users.map((user) => user.id);
@@ -736,10 +758,11 @@ test(
     );
     assert.equal(userA.workspaceCount, 1);
     assert.equal(userA.workspaces[0].name, "Workspace A");
-    const superAdmin = result.body.users.find(
-      (user) => user.email === "super-admin@example.test",
+    assert.equal(
+      result.body.users.some((user) => user.email === "platform-admin@rebiz.test"),
+      false,
+      "a platform administrator must never appear in the customer list",
     );
-    assert.equal(superAdmin.platformRole, "SUPER_ADMIN");
   },
 );
 
@@ -748,7 +771,7 @@ test(
   { concurrency: false },
   async () => {
     const byName = await request("/api/admin/workspaces?q=Workspace%20B", {
-      token: fixture.superAdminToken,
+      adminToken: fixture.adminToken,
     });
     assert.deepEqual(
       byName.body.workspaces.map((workspace) => workspace.name),
@@ -756,7 +779,7 @@ test(
     );
 
     const byOwner = await request("/api/admin/workspaces?q=user-a@example", {
-      token: fixture.superAdminToken,
+      adminToken: fixture.adminToken,
     });
     assert.deepEqual(
       byOwner.body.workspaces.map((workspace) => workspace.name),
@@ -764,7 +787,7 @@ test(
     );
 
     const noMatch = await request("/api/admin/workspaces?q=nothing-matches", {
-      token: fixture.superAdminToken,
+      adminToken: fixture.adminToken,
     });
     assert.deepEqual(noMatch.body.workspaces, []);
   },
@@ -798,6 +821,57 @@ async function supportsTransactions() {
 }
 
 test(
+  "a platform admin cookie grants nothing in the product",
+  { concurrency: false },
+  async () => {
+    // The reverse direction matters as much as the forward one: running the
+    // platform must not hand anyone a way into a customer's records.
+    for (const path of ["/api/receipts", "/api/quotes", "/api/ledger", "/api/invoices"]) {
+      const result = await request(path, { adminToken: fixture.adminToken });
+      assert.equal(result.response.status, 401, `expected 401 for ${path}`);
+    }
+    const page = await requestPage("/dashboard", { adminToken: fixture.adminToken });
+    assert.equal(
+      new URL(page.headers.get("location"), baseUrl).pathname,
+      "/login",
+    );
+  },
+);
+
+test(
+  "a customer cookie grants nothing in the back office, even for a company owner",
+  { concurrency: false },
+  async () => {
+    for (const path of [
+      "/api/admin/overview",
+      "/api/admin/workspaces",
+      "/api/admin/users",
+      "/api/admin/audit-logs",
+    ]) {
+      const result = await request(path, { token: fixture.userAToken });
+      assert.equal(result.response.status, 403, `expected 403 for ${path}`);
+    }
+  },
+);
+
+test(
+  "the back office has its own login, and a customer password does not open it",
+  { concurrency: false },
+  async () => {
+    const asCustomer = await request("/api/admin/auth/login", {
+      body: { email: "user-a@example.test", password: "whatever-they-use" },
+      method: "POST",
+    });
+    assert.equal(asCustomer.response.status, 401);
+
+    // The login page itself must stay reachable, or a locked-out admin has no
+    // way back in.
+    const loginPage = await requestPage("/admin/login");
+    assert.equal(loginPage.status, 200);
+  },
+);
+
+test(
   "a failed audit write never leaves an unlogged change behind",
   { concurrency: false },
   async () => {
@@ -818,7 +892,7 @@ test(
       {
         body: { status: "suspended" },
         method: "PATCH",
-        token: fixture.superAdminToken,
+        adminToken: fixture.adminToken,
       },
     );
     const workspace = await database

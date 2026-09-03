@@ -16,7 +16,6 @@ type Workspace = {
    */
   features: AppUser["features"];
   isOwner: boolean;
-  isSuperAdmin: boolean;
   organization: AppUser["organization"];
   /** True for the viewer role, which can read everything and change nothing. */
   readOnly: boolean;
@@ -41,7 +40,6 @@ export function WorkspaceProvider({ children, user }: { children: ReactNode; use
       currency: user.organization.currency,
       features: user.features,
       isOwner: role === "owner",
-      isSuperAdmin: user.platformRole === "SUPER_ADMIN",
       organization: user.organization,
       readOnly: role === "viewer",
       role,

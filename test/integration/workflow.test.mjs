@@ -179,7 +179,6 @@ before(async () => {
       email: `workflow-${index}@example.test`,
       name: `Workflow User ${index}`,
       passwordHash: "unused",
-      platformRole: "USER",
     })),
   );
   await database.collection("organizations").insertMany([

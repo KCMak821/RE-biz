@@ -79,7 +79,6 @@ export default async function globalSetup() {
         mustChangePassword: false,
         name: person.name,
         passwordHash: await hash(person.password, 10),
-        platformRole: "USER",
       });
       await database.collection("memberships").insertOne({
         createdAt: now,

@@ -13,8 +13,6 @@ const SESSION_DURATION_MS = 1000 * 60 * 60 * 24 * 30;
 
 export const memberRoles = ["owner", "admin", "operator", "viewer"] as const;
 export type MemberRole = typeof memberRoles[number];
-export const platformRoles = ["USER", "SUPER_ADMIN"] as const;
-export type PlatformRole = typeof platformRoles[number];
 export const accountStatuses = ["active", "disabled"] as const;
 export type AccountStatus = typeof accountStatuses[number];
 export const workspaceStatuses = ["active", "suspended"] as const;
@@ -31,7 +29,6 @@ export type AppUser = {
   id: string;
   mustChangePassword: boolean;
   name: string;
-  platformRole: PlatformRole;
   organization: {
     address: string;
     bankDetails: string;
@@ -51,8 +48,6 @@ export type AppUser = {
     timeZone: string;
   };
 };
-export type PlatformAdminActor = { email: string; id: string; name: string; platformRole: "SUPER_ADMIN" };
-
 export type UserDocument = {
   accountStatus?: AccountStatus;
   createdAt: Date;
@@ -60,7 +55,6 @@ export type UserDocument = {
   mustChangePassword?: boolean;
   name: string;
   passwordHash: string;
-  platformRole?: PlatformRole;
 };
 
 type OrganizationLogo = { contentType: "image/jpeg" | "image/png" | "image/svg+xml"; data: Binary | Buffer };
@@ -109,7 +103,7 @@ export async function prepareAuthCollections() {
   const database = await getDatabase();
   await Promise.all([
     database.collection<UserDocument>("users").createIndex({ email: 1 }, { unique: true }),
-    database.collection<UserDocument>("users").createIndex({ accountStatus: 1, platformRole: 1 }),
+    database.collection<UserDocument>("users").createIndex({ accountStatus: 1 }),
     database.collection<MembershipDocument>("memberships").createIndex({ organizationId: 1, userId: 1 }, { unique: true }),
     database.collection<MembershipDocument>("memberships").createIndex({ userId: 1, status: 1 }),
     database.collection<OrganizationDocument>("organizations").createIndex({ status: 1, createdAt: -1 }),
@@ -126,7 +120,6 @@ async function createUser(input: { email: string; mustChangePassword: boolean; n
     const result = await users.insertOne({
       accountStatus: "active", createdAt: new Date(), email, mustChangePassword: input.mustChangePassword, name: input.name,
       passwordHash: await hash(input.password, 12),
-      platformRole: "USER",
     });
     return { email, id: result.insertedId.toHexString(), name: input.name };
   } catch (error) {
@@ -161,7 +154,6 @@ async function toAppUser(user: UserDocument & { _id: ObjectId }): Promise<AppUse
     : await readWorkspaceFeatures(membership.organizationId).catch(() => defaultWorkspaceFeatures());
   return {
     email: user.email, features, id: user._id.toHexString(), mustChangePassword: user.mustChangePassword === true, name: user.name,
-    platformRole: user.platformRole ?? "USER",
     organization: {
       address: organization.address ?? "", bankDetails: organization.bankDetails ?? "", businessRegistration: organization.businessRegistration ?? "", contact: organization.contact ?? "", currency: organization.currency ?? "HKD", email: organization.email ?? "",
       hasLogo: Boolean(organization.logo), hasSealImage: Boolean(organization.seal), id: organization._id.toHexString(), name: organization.name, phone: organization.phone ?? "", receiptTemplate: normalizeUploadedSealLayout({ ...defaultReceiptTemplate, ...organization.receiptTemplate }), role: membership.role, sealUpdatedAt: organization.seal?.updatedAt.toISOString(), timeZone: organization.timeZone ?? "Asia/Hong_Kong",
@@ -232,7 +224,6 @@ export async function listMembers(user: AppUser) {
 
 export function canManageMembers(user: AppUser) { return canUseWorkspace(user) && (user.organization.role === "owner" || user.organization.role === "admin"); }
 export function canUseWorkspace(user: AppUser) { return user.organization.status === "active"; }
-export function isSuperAdmin(user: AppUser | null | undefined): user is AppUser { return user?.platformRole === "SUPER_ADMIN"; }
 export function canManageOrganizationSettings(user: AppUser) { return canUseWorkspace(user) && (user.organization.role === "owner" || user.organization.role === "admin"); }
 export function canCreateRole(user: AppUser, role: MemberRole) { return user.organization.role === "owner" ? role !== "owner" : role === "operator" || role === "viewer"; }
 export function canManageRecords(user: AppUser) { return canUseWorkspace(user) && user.organization.role !== "viewer"; }
@@ -326,12 +317,6 @@ async function getCurrentSessionUser(): Promise<(UserDocument & { _id: ObjectId 
   const session = await database.collection<SessionDocument>("sessions").findOne({ expiresAt: { $gt: new Date() }, tokenHash: tokenHash(token) });
   if (!session) return null;
   return database.collection<UserDocument>("users").findOne({ _id: session.userId });
-}
-
-export async function getCurrentPlatformAdmin(): Promise<PlatformAdminActor | null> {
-  const user = await getCurrentSessionUser();
-  if (!user || user.accountStatus === "disabled" || user.platformRole !== "SUPER_ADMIN") return null;
-  return { email: user.email, id: user._id.toHexString(), name: user.name, platformRole: "SUPER_ADMIN" };
 }
 
 export async function deleteCurrentSession() {

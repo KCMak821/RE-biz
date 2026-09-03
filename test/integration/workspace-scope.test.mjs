@@ -171,7 +171,6 @@ before(async () => {
       email: `scope-${index}@example.test`,
       name: `Member ${index}`,
       passwordHash: "unused",
-      platformRole: "USER",
     })),
   );
   await database.collection("organizations").insertMany([

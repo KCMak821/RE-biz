@@ -9,7 +9,6 @@ import {
   Package,
   Palette,
   ReceiptText,
-  ShieldCheck,
   Users,
   UsersRound,
   type LucideIcon,
@@ -30,8 +29,6 @@ export type NavItem = {
   href: string;
   icon: LucideIcon;
   label: string;
-  /** Only visible to a platform super admin. */
-  superAdminOnly?: boolean;
 };
 
 export type NavGroup = { items: NavItem[]; label: string };
@@ -135,14 +132,6 @@ export const navigation: NavGroup[] = [
         icon: KeyRound,
         label: "我的帳號",
       },
-      {
-        description: "跨工作區的平台管理後台。",
-        external: true,
-        href: "/admin",
-        icon: ShieldCheck,
-        label: "平台管理",
-        superAdminOnly: true,
-      },
     ],
   },
 ];
@@ -162,11 +151,9 @@ export function navItemFor(pathname: string) {
 export function visibleNavigation({
   canManageSettings,
   features,
-  isSuperAdmin,
 }: {
   canManageSettings: boolean;
   features: WorkspaceFeatures;
-  isSuperAdmin: boolean;
 }) {
   return navigation
     .map((group) => ({
@@ -174,7 +161,6 @@ export function visibleNavigation({
       items: group.items.filter(
         (item) =>
           (!item.adminOnly || canManageSettings) &&
-          (!item.superAdminOnly || isSuperAdmin) &&
           // Hiding a switched-off feature is presentation only; the API keeps
           // rejecting it for anyone who types the URL directly.
           (!item.feature || features[item.feature]),

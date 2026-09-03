@@ -181,7 +181,6 @@ before(async () => {
       email: `race-${index}@example.test`,
       name: `Race User ${index}`,
       passwordHash: "unused",
-      platformRole: "USER",
     })),
   );
   await database.collection("organizations").insertMany([

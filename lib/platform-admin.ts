@@ -1,6 +1,7 @@
 import { ObjectId, type ClientSession, type Filter } from "mongodb";
 
-import { getCurrentPlatformAdmin, type AccountStatus, type OrganizationDocument, type PlatformAdminActor, type PlatformRole, type UserDocument, type WorkspaceStatus } from "@/lib/auth";
+import { type AccountStatus, type OrganizationDocument, type UserDocument, type WorkspaceStatus } from "@/lib/auth";
+import { getCurrentPlatformAdmin, type PlatformAdminActor, type PlatformAdminDocument } from "@/lib/platform-auth";
 import { getDatabase, getMongoClient } from "@/lib/mongodb";
 import { escapedRegex, keywordRegex } from "@/lib/query";
 
@@ -34,7 +35,15 @@ type WorkspaceFeatureDocument = {
 };
 type PlatformAuditLogDocument = {
   action: PlatformAuditAction;
-  actorUserId: ObjectId;
+  /** Who made the change; resolved against the collection named by `actorKind`. */
+  actorId: ObjectId;
+  /**
+   * Rows written before platform admins were split out of `users` name a
+   * customer account that held SUPER_ADMIN at the time. They keep pointing at
+   * `users` so that history stays attributable instead of turning into
+   * "unknown administrator".
+   */
+  actorKind: "platformAdmin" | "legacyUser";
   createdAt: Date;
   metadata?: Record<string, boolean | number | string>;
   targetId: string;
@@ -78,7 +87,6 @@ export type AdminUserRow = {
   email: string;
   id: string;
   name: string;
-  platformRole: PlatformRole;
   workspaceCount: number;
   workspaces: Array<{ id: string; name: string; role: MembershipDocument["role"] }>;
 };
@@ -99,11 +107,12 @@ export async function preparePlatformAdminCollections() {
   await Promise.all([
     database.collection<WorkspaceFeatureDocument>("workspaceFeatures").createIndex({ organizationId: 1, featureKey: 1 }, { unique: true }),
     database.collection<PlatformAuditLogDocument>("platformAuditLogs").createIndex({ createdAt: -1 }),
-    database.collection<PlatformAuditLogDocument>("platformAuditLogs").createIndex({ actorUserId: 1, createdAt: -1 }),
+    database.collection<PlatformAuditLogDocument>("platformAuditLogs").createIndex({ actorId: 1, createdAt: -1 }),
     database.collection<PlatformAuditLogDocument>("platformAuditLogs").createIndex({ targetType: 1, targetId: 1, createdAt: -1 }),
   ]);
 }
 
+/** The signed-in platform administrator, or null. Never a customer, whatever cookie they hold. */
 export async function getCurrentSuperAdmin(): Promise<PlatformAdminActor | null> { return getCurrentPlatformAdmin(); }
 
 export async function getPlatformOverview() {
@@ -235,7 +244,7 @@ export async function listAdminUsers(): Promise<AdminUserRow[]> {
   await preparePlatformAdminCollections();
   const database = await getDatabase();
   const [users, memberships, organizations] = await Promise.all([
-    database.collection<UserDocument>("users").find({}, { projection: { accountStatus: 1, createdAt: 1, email: 1, name: 1, platformRole: 1 } }).sort({ createdAt: -1 }).toArray(),
+    database.collection<UserDocument>("users").find({}, { projection: { accountStatus: 1, createdAt: 1, email: 1, name: 1 } }).sort({ createdAt: -1 }).toArray(),
     database.collection<MembershipDocument>("memberships").find({}).toArray(),
     database.collection<OrganizationDocument>("organizations").find({}, { projection: { name: 1 } }).toArray(),
   ]);
@@ -249,8 +258,7 @@ export async function listAdminUsers(): Promise<AdminUserRow[]> {
       });
     return {
       accountStatus: accountStatus(user.accountStatus), createdAt: user.createdAt.toISOString(), email: user.email,
-      id: user._id.toHexString(), name: user.name, platformRole: user.platformRole ?? "USER",
-      workspaceCount: workspaces.length, workspaces,
+      id: user._id.toHexString(), name: user.name, workspaceCount: workspaces.length, workspaces,
     };
   });
 }
@@ -345,7 +353,7 @@ export async function updateWorkspaceStatus(actor: Pick<PlatformAdminActor, "id"
   return auditedMutation(
     {
       action: status === "suspended" ? "WORKSPACE_SUSPENDED" : "WORKSPACE_REACTIVATED",
-      actorUserId: new ObjectId(actor.id), targetId: workspaceId, targetType: "workspace",
+      actorId: new ObjectId(actor.id), actorKind: "platformAdmin", targetId: workspaceId, targetType: "workspace",
     },
     // Status is a switch, never a delete: suspending keeps every record and
     // reactivating restores access to all of it.
@@ -362,7 +370,7 @@ export async function updateWorkspaceFeature(actor: Pick<PlatformAdminActor, "id
   const database = await getDatabase();
   return auditedMutation(
     {
-      action: enabled ? "FEATURE_ENABLED" : "FEATURE_DISABLED", actorUserId: new ObjectId(actor.id),
+      action: enabled ? "FEATURE_ENABLED" : "FEATURE_DISABLED", actorId: new ObjectId(actor.id), actorKind: "platformAdmin",
       metadata: { enabled, featureKey }, targetId: `${workspaceId}:${featureKey}`, targetType: "workspace_feature",
     },
     async (session) => {
@@ -384,7 +392,7 @@ export async function updatePlatformUserStatus(actor: Pick<PlatformAdminActor, "
   return auditedMutation(
     {
       action: status === "disabled" ? "USER_DISABLED" : "USER_ENABLED",
-      actorUserId: new ObjectId(actor.id), targetId: userId, targetType: "user",
+      actorId: new ObjectId(actor.id), actorKind: "platformAdmin", targetId: userId, targetType: "user",
     },
     async (session) => (await database.collection<UserDocument>("users").updateOne(
       { _id: new ObjectId(userId) }, { $set: { accountStatus: status } }, { session },
@@ -418,13 +426,22 @@ export async function listPlatformAuditLogs(filters: PlatformAuditLogFilters = {
   }
   const limit = Math.min(500, Math.max(1, Math.floor(filters.limit ?? 200)));
   const entries = await database.collection<PlatformAuditLogDocument>("platformAuditLogs").find(query).sort({ createdAt: -1 }).limit(limit).toArray();
-  const actorIds = [...new Set(entries.map((entry) => entry.actorUserId.toHexString()))].map((id) => new ObjectId(id));
-  const actors = actorIds.length
-    ? await database.collection<UserDocument>("users").find({ _id: { $in: actorIds } }, { projection: { email: 1, name: 1 } }).toArray()
-    : [];
-  const actorsById = new Map(actors.map((actor) => [actor._id.toHexString(), actor]));
+  const idsByKind = { legacyUser: [] as ObjectId[], platformAdmin: [] as ObjectId[] };
+  for (const id of new Set(entries.map((entry) => `${entry.actorKind ?? "legacyUser"}:${entry.actorId.toHexString()}`))) {
+    const [kind, value] = id.split(":");
+    idsByKind[kind === "platformAdmin" ? "platformAdmin" : "legacyUser"].push(new ObjectId(value));
+  }
+  const [admins, legacyUsers] = await Promise.all([
+    idsByKind.platformAdmin.length
+      ? database.collection<PlatformAdminDocument>("platformAdmins").find({ _id: { $in: idsByKind.platformAdmin } }, { projection: { email: 1, name: 1 } }).toArray()
+      : [],
+    idsByKind.legacyUser.length
+      ? database.collection<UserDocument>("users").find({ _id: { $in: idsByKind.legacyUser } }, { projection: { email: 1, name: 1 } }).toArray()
+      : [],
+  ]);
+  const actorsById = new Map([...admins, ...legacyUsers].map((actor) => [actor._id.toHexString(), actor]));
   return entries.map((entry) => {
-    const actor = actorsById.get(entry.actorUserId.toHexString());
+    const actor = actorsById.get(entry.actorId.toHexString());
     return {
       action: entry.action, actor: actor ? { email: actor.email, name: actor.name } : null,
       createdAt: entry.createdAt.toISOString(), id: entry._id.toHexString(), metadata: entry.metadata ?? null,
