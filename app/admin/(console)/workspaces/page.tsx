@@ -8,6 +8,7 @@ import { PageHeader } from "@/components/app/page-header";
 import { StatusBadge } from "@/components/app/status-badge";
 import { formatDate } from "@/lib/format";
 import { listAdminWorkspaces } from "@/lib/platform-admin";
+import { planLabel } from "@/lib/status";
 
 export const metadata: Metadata = { title: "工作區｜RE-Biz 平台管理" };
 
@@ -31,7 +32,7 @@ export default async function WorkspacesPage({
         action="/admin/workspaces"
         keyword={keyword}
         label="搜尋公司"
-        placeholder="公司名稱、擁有者或 ID"
+        placeholder="公司名稱、擁有者、方案或 ID"
         resultLabel={keyword ? `符合「${keyword}」的有 ${workspaces.length} 個` : undefined}
       />
       <ListCard footer={workspaces.length && !keyword ? `共 ${workspaces.length} 個公司。` : undefined}>
@@ -42,6 +43,8 @@ export default async function WorkspacesPage({
                 <tr>
                   <th>名稱</th>
                   <th>擁有者</th>
+                  <th>方案</th>
+                  <th>訂閱</th>
                   <th className="is-end">成員數</th>
                   <th className="is-end">收據</th>
                   <th className="is-end">報價單</th>
@@ -69,6 +72,10 @@ export default async function WorkspacesPage({
                       ) : (
                         "—"
                       )}
+                    </td>
+                    <td>{planLabel(workspace.subscription.planKey)}</td>
+                    <td>
+                      <StatusBadge domain="subscription" value={workspace.subscription.status} />
                     </td>
                     <td className="is-end">{workspace.userCount}</td>
                     <td className="is-end">{workspace.usage.receipts.toLocaleString()}</td>

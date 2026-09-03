@@ -6,6 +6,7 @@ import { cookies } from "next/headers";
 
 import { getDatabase } from "@/lib/mongodb";
 import { defaultReceiptTemplate, normalizeUploadedSealLayout, type ReceiptTemplate } from "@/lib/receipt-template";
+import type { PlanKey, SubscriptionStatus } from "@/lib/subscription";
 import { defaultWorkspaceFeatures, readWorkspaceFeatures, type WorkspaceFeatures } from "@/lib/workspace-features";
 
 const SESSION_COOKIE = "receipt_session";
@@ -59,6 +60,23 @@ export type UserDocument = {
 
 type OrganizationLogo = { contentType: "image/jpeg" | "image/png" | "image/svg+xml"; data: Binary | Buffer };
 export type OrganizationSeal = { contentType: "image/jpeg" | "image/png" | "image/webp"; data: Binary | Buffer; updatedAt: Date };
+/**
+ * The company's current subscription. History is not kept here: plan changes
+ * are written to the platform audit log, which is where "who moved them and
+ * when" belongs.
+ */
+export type WorkspaceSubscriptionDocument = {
+  currentPeriodEnd?: Date;
+  /** Reserved for a payment provider's identifiers. Nothing reads these yet. */
+  externalCustomerId?: string;
+  externalSubscriptionId?: string;
+  note?: string;
+  planKey: PlanKey;
+  startedAt: Date;
+  status: SubscriptionStatus;
+  trialEndsAt?: Date;
+};
+
 export type OrganizationDocument = {
   address?: string;
   bankDetails?: string;
@@ -74,6 +92,7 @@ export type OrganizationDocument = {
   receiptTemplate?: ReceiptTemplate;
   seal?: OrganizationSeal;
   status?: WorkspaceStatus;
+  subscription?: WorkspaceSubscriptionDocument;
   timeZone: string;
 };
 type MembershipStatus = "active" | "suspended";

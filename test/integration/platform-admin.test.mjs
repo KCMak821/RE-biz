@@ -872,6 +872,99 @@ test(
 );
 
 test(
+  "a workspace with no subscription record reads as the default plan",
+  { concurrency: false },
+  async () => {
+    // The fixtures seed no subscription, which is what every company looked
+    // like before subscriptions existed.
+    const result = await request(`/api/admin/workspaces/${fixture.workspaceAId}`, {
+      adminToken: fixture.adminToken,
+    });
+    assert.equal(result.response.status, 200);
+    assert.equal(result.body.workspace.subscription.planKey, "free");
+    assert.equal(result.body.workspace.subscription.status, "active");
+    assert.equal(result.body.workspace.subscription.currentPeriodEnd, null);
+  },
+);
+
+test(
+  "changing a plan is recorded, audited, and changes nothing a customer can do",
+  { concurrency: false },
+  async () => {
+    const before = await request("/api/receipts", { token: fixture.userAToken });
+    assert.equal(before.response.status, 200);
+
+    const change = await request(
+      `/api/admin/workspaces/${fixture.workspaceAId}/subscription`,
+      {
+        adminToken: fixture.adminToken,
+        body: { planKey: "pro", status: "trialing", trialEndsAt: "2027-01-31" },
+        method: "PATCH",
+      },
+    );
+    assert.equal(change.response.status, 200);
+
+    const workspace = await request(`/api/admin/workspaces/${fixture.workspaceAId}`, {
+      adminToken: fixture.adminToken,
+    });
+    assert.equal(workspace.body.workspace.subscription.planKey, "pro");
+    assert.equal(workspace.body.workspace.subscription.status, "trialing");
+    assert.ok(workspace.body.workspace.subscription.trialEndsAt.startsWith("2027-01-31"));
+
+    // Recording a plan must not become an entitlement change by accident: the
+    // customer can do exactly what they could before.
+    const after = await request("/api/receipts", { token: fixture.userAToken });
+    assert.equal(after.response.status, 200);
+
+    const logs = await request(
+      `/api/admin/audit-logs?workspaceId=${fixture.workspaceAId}`,
+      { adminToken: fixture.adminToken },
+    );
+    const planChange = logs.body.auditLogs.find(
+      (log) => log.action === "SUBSCRIPTION_PLAN_CHANGED",
+    );
+    assert.ok(planChange, "expected SUBSCRIPTION_PLAN_CHANGED in the audit log");
+    assert.equal(planChange.metadata.fromPlan, "free");
+    assert.equal(planChange.metadata.toPlan, "pro");
+    assert.equal(planChange.actor.email, "platform-admin@rebiz.test");
+  },
+);
+
+test(
+  "the subscription endpoint rejects unknown plans and non-admins",
+  { concurrency: false },
+  async () => {
+    const badPlan = await request(
+      `/api/admin/workspaces/${fixture.workspaceAId}/subscription`,
+      { adminToken: fixture.adminToken, body: { planKey: "enterprise" }, method: "PATCH" },
+    );
+    assert.equal(badPlan.response.status, 400);
+
+    const asCustomer = await request(
+      `/api/admin/workspaces/${fixture.workspaceAId}/subscription`,
+      { body: { planKey: "pro" }, method: "PATCH", token: fixture.userAToken },
+    );
+    assert.equal(asCustomer.response.status, 403);
+  },
+);
+
+test(
+  "usage reports the current month separately from the running total",
+  { concurrency: false },
+  async () => {
+    const result = await request(`/api/admin/workspaces/${fixture.workspaceBId}`, {
+      adminToken: fixture.adminToken,
+    });
+    const usage = result.body.workspace.usage;
+    // The seeded receipt for Workspace B is created with the fixture, so it
+    // counts in both the total and the current month.
+    assert.equal(usage.receipts, 1);
+    assert.equal(usage.thisMonth.receipts, 1);
+    assert.equal(usage.thisMonth.quotations, 0);
+  },
+);
+
+test(
   "a failed audit write never leaves an unlogged change behind",
   { concurrency: false },
   async () => {

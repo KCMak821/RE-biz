@@ -69,7 +69,14 @@ const feature: Record<string, StatusDescriptor> = {
   disabled: { label: "已關閉", tone: "muted" },
 };
 
-const registry = { account, customer, feature, invoice, item, ledger, member, quote, receipt, workspace };
+const subscription: Record<string, StatusDescriptor> = {
+  trialing: { hint: "試用期間，尚未開始收費。", label: "試用中", tone: "info" },
+  active: { hint: "訂閱正常。", label: "訂閱中", tone: "success" },
+  past_due: { hint: "款項逾期。目前不會自動停用，需要人工處理。", label: "款項逾期", tone: "warning" },
+  canceled: { hint: "已取消訂閱，資料保留。", label: "已取消", tone: "muted" },
+};
+
+const registry = { account, customer, feature, invoice, item, ledger, member, quote, receipt, subscription, workspace };
 
 export type StatusDomain = keyof typeof registry;
 
@@ -80,6 +87,12 @@ export function status(domain: StatusDomain, value: string | undefined | null): 
 
 
 /* ---------------------------------------------------------------- vocabulary */
+
+export function planLabel(key: string | undefined | null) {
+  return planLabels[key as keyof typeof planLabels] ?? key ?? "—";
+}
+
+export const planLabels = { free: "免費", pro: "專業", starter: "標準" } as const;
 
 export const roleLabels = {
   admin: "管理者",

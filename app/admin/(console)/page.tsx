@@ -4,10 +4,13 @@ import Link from "next/link";
 import { ButtonLink } from "@/components/app/button";
 import { EmptyState } from "@/components/app/empty-state";
 import { PageHeader } from "@/components/app/page-header";
-import { Card, Stat, Stats } from "@/components/app/surfaces";
+import { Card, Stat, Stats, SummaryList } from "@/components/app/surfaces";
 import { auditActionLabel, auditMetadataLabel, auditResultLabel, auditTargetLabel } from "@/components/admin/presentation";
 import { formatDateTime } from "@/lib/format";
 import { getPlatformOverview } from "@/lib/platform-admin";
+import { planLabel } from "@/lib/status";
+import { planKeys, subscriptionStatuses } from "@/lib/subscription";
+import { status as statusDescriptor } from "@/lib/status";
 
 export const metadata: Metadata = { title: "平台總覽｜RE-Biz 平台管理" };
 
@@ -45,6 +48,36 @@ export default async function AdminOverviewPage() {
           />
         ))}
       </Stats>
+
+      <Card
+        description="方案與訂閱狀態目前只是登記，不會阻擋任何人使用。定價確定前，先用這裡看真實分佈。"
+        title="訂閱分佈"
+      >
+        <div className="admin-feature-list">
+          <div>
+            <h3 className="card-title" style={{ fontSize: 16, marginBottom: 10 }}>
+              依方案
+            </h3>
+            <SummaryList
+              items={planKeys.map((key) => ({
+                label: planLabel(key),
+                value: `${overview.subscriptions.byPlan[key].toLocaleString()} 間公司`,
+              }))}
+            />
+          </div>
+          <div>
+            <h3 className="card-title" style={{ fontSize: 16, marginBottom: 10 }}>
+              依訂閱狀態
+            </h3>
+            <SummaryList
+              items={subscriptionStatuses.map((state) => ({
+                label: statusDescriptor("subscription", state).label,
+                value: `${overview.subscriptions.byStatus[state].toLocaleString()} 間公司`,
+              }))}
+            />
+          </div>
+        </div>
+      </Card>
 
       <Card
         action={<Link className="btn btn-secondary btn-sm" href="/admin/audit-logs">查看全部</Link>}

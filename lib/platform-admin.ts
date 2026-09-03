@@ -1,6 +1,10 @@
 import { ObjectId, type ClientSession, type Filter } from "mongodb";
 
-import { type AccountStatus, type OrganizationDocument, type UserDocument, type WorkspaceStatus } from "@/lib/auth";
+import { type AccountStatus, type OrganizationDocument, type UserDocument, type WorkspaceStatus, type WorkspaceSubscriptionDocument } from "@/lib/auth";
+import {
+  defaultPlanKey, isPlanKey, isSubscriptionStatus, planKeys, plans, subscriptionStatuses,
+  type PlanKey, type SubscriptionStatus, type WorkspaceSubscription,
+} from "@/lib/subscription";
 import { getCurrentPlatformAdmin, type PlatformAdminActor, type PlatformAdminDocument } from "@/lib/platform-auth";
 import { getDatabase, getMongoClient } from "@/lib/mongodb";
 import { escapedRegex, keywordRegex } from "@/lib/query";
@@ -16,6 +20,9 @@ export const platformAuditActions = [
   "USER_ENABLED",
   "FEATURE_ENABLED",
   "FEATURE_DISABLED",
+  "SUBSCRIPTION_PLAN_CHANGED",
+  "SUBSCRIPTION_STATUS_CHANGED",
+  "SUBSCRIPTION_DATES_CHANGED",
 ] as const;
 export type PlatformAuditAction = typeof platformAuditActions[number];
 
@@ -54,6 +61,12 @@ export type WorkspaceUsage = {
   accountingRecords: number;
   quotations: number;
   receipts: number;
+  /**
+   * The current calendar month, which is what a monthly allowance is measured
+   * against. Counted on `createdAt` — when the workspace actually did the
+   * work — rather than on a back-dated issue date.
+   */
+  thisMonth: { accountingRecords: number; quotations: number; receipts: number };
 };
 export type AdminWorkspace = {
   createdAt: string;
@@ -61,6 +74,7 @@ export type AdminWorkspace = {
   name: string;
   owner: { email: string; name: string } | null;
   status: WorkspaceStatus;
+  subscription: WorkspaceSubscription;
   usage: WorkspaceUsage;
   userCount: number;
 };
@@ -119,7 +133,7 @@ export async function getPlatformOverview() {
   await preparePlatformAdminCollections();
   const database = await getDatabase();
   const organizations = database.collection<OrganizationDocument>("organizations");
-  const [totalWorkspaces, suspendedWorkspaces, totalUsers, totalReceipts, totalAccountingRecords, totalQuotations, recentAuditLogs] = await Promise.all([
+  const [totalWorkspaces, suspendedWorkspaces, totalUsers, totalReceipts, totalAccountingRecords, totalQuotations, recentAuditLogs, subscriptions] = await Promise.all([
     organizations.countDocuments(),
     organizations.countDocuments({ status: "suspended" }),
     database.collection<UserDocument>("users").countDocuments(),
@@ -127,16 +141,67 @@ export async function getPlatformOverview() {
     database.collection("ledgerEntries").countDocuments(),
     database.collection("quotes").countDocuments(),
     listPlatformAuditLogs({ limit: 6 }),
+    planBreakdown(),
   ]);
   return {
     // Workspaces predating the status field count as active, so the active
     // total is the remainder rather than a second status query.
     activeWorkspaces: totalWorkspaces - suspendedWorkspaces,
-    recentAuditLogs, suspendedWorkspaces, totalAccountingRecords, totalQuotations, totalReceipts, totalUsers, totalWorkspaces,
+    recentAuditLogs, subscriptions, suspendedWorkspaces, totalAccountingRecords, totalQuotations, totalReceipts, totalUsers, totalWorkspaces,
   };
 }
 
-function emptyUsage(): WorkspaceUsage { return { accountingRecords: 0, quotations: 0, receipts: 0 }; }
+/**
+ * How companies are distributed across plans and subscription states. This is
+ * the number to watch before pricing is fixed: it says who would be affected by
+ * a given price or allowance, while nothing is being enforced.
+ */
+async function planBreakdown() {
+  const database = await getDatabase();
+  const rows = await database.collection<OrganizationDocument>("organizations").aggregate<{
+    _id: { planKey: string | null; status: string | null };
+    count: number;
+  }>([
+    { $group: { _id: { planKey: "$subscription.planKey", status: "$subscription.status" }, count: { $sum: 1 } } },
+  ]).toArray();
+
+  const byPlan = Object.fromEntries(planKeys.map((key) => [key, 0])) as Record<PlanKey, number>;
+  const byStatus = Object.fromEntries(subscriptionStatuses.map((key) => [key, 0])) as Record<SubscriptionStatus, number>;
+  for (const row of rows) {
+    // Companies created before subscriptions read as the default plan, exactly
+    // as they do everywhere else.
+    byPlan[isPlanKey(row._id.planKey) ? row._id.planKey : defaultPlanKey] += row.count;
+    byStatus[isSubscriptionStatus(row._id.status) ? row._id.status : "active"] += row.count;
+  }
+  return { byPlan, byStatus };
+}
+
+function emptyUsage(): WorkspaceUsage {
+  return { accountingRecords: 0, quotations: 0, receipts: 0, thisMonth: { accountingRecords: 0, quotations: 0, receipts: 0 } };
+}
+
+/** First instant of the current calendar month, in the server's local time. */
+function startOfThisMonth() {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), 1);
+}
+
+/**
+ * A workspace with no subscription row predates subscriptions; it reads as the
+ * default plan rather than as broken, so the admin never shows a blank.
+ */
+function toSubscription(document: WorkspaceSubscriptionDocument | undefined, createdAt: Date): WorkspaceSubscription {
+  return {
+    currentPeriodEnd: document?.currentPeriodEnd?.toISOString() ?? null,
+    externalCustomerId: document?.externalCustomerId ?? null,
+    externalSubscriptionId: document?.externalSubscriptionId ?? null,
+    note: document?.note ?? null,
+    planKey: isPlanKey(document?.planKey) ? document.planKey : defaultPlanKey,
+    startedAt: (document?.startedAt ?? createdAt).toISOString(),
+    status: isSubscriptionStatus(document?.status) ? document.status : "active",
+    trialEndsAt: document?.trialEndsAt?.toISOString() ?? null,
+  };
+}
 
 /**
  * Usage for many workspaces in three grouped queries rather than three counts
@@ -149,16 +214,29 @@ async function usageByWorkspace(organizationIds: ObjectId[]): Promise<Map<string
   if (!organizationIds.length) return usage;
   const database = await getDatabase();
   const sources = [["receipts", "receipts"], ["ledgerEntries", "accountingRecords"], ["quotes", "quotations"]] as const;
-  await Promise.all(sources.map(async ([collectionName, key]) => {
-    const rows = await database.collection(collectionName).aggregate<{ _id: ObjectId | null; count: number }>([
-      { $match: { organizationId: { $in: organizationIds } } },
-      { $group: { _id: "$organizationId", count: { $sum: 1 } } },
-    ]).toArray();
-    for (const row of rows) {
-      const entry = row._id ? usage.get(row._id.toHexString()) : undefined;
-      if (entry) entry[key] = row.count;
-    }
-  }));
+  const monthStart = startOfThisMonth();
+  await Promise.all(sources.flatMap(([collectionName, key]) => [
+    (async () => {
+      const rows = await database.collection(collectionName).aggregate<{ _id: ObjectId | null; count: number }>([
+        { $match: { organizationId: { $in: organizationIds } } },
+        { $group: { _id: "$organizationId", count: { $sum: 1 } } },
+      ]).toArray();
+      for (const row of rows) {
+        const entry = row._id ? usage.get(row._id.toHexString()) : undefined;
+        if (entry) entry[key] = row.count;
+      }
+    })(),
+    (async () => {
+      const rows = await database.collection(collectionName).aggregate<{ _id: ObjectId | null; count: number }>([
+        { $match: { createdAt: { $gte: monthStart }, organizationId: { $in: organizationIds } } },
+        { $group: { _id: "$organizationId", count: { $sum: 1 } } },
+      ]).toArray();
+      for (const row of rows) {
+        const entry = row._id ? usage.get(row._id.toHexString()) : undefined;
+        if (entry) entry.thisMonth[key] = row.count;
+      }
+    })(),
+  ]));
   return usage;
 }
 
@@ -199,6 +277,7 @@ export async function listAdminWorkspaces({ keyword = "" }: { keyword?: string }
       name: organization.name,
       owner: owner ? { email: owner.email, name: owner.name } : null,
       status: workspaceStatus(organization.status),
+      subscription: toSubscription(organization.subscription, organization.createdAt),
       usage: usage.get(organization._id.toHexString()) ?? emptyUsage(),
       userCount: organizationMemberships.filter((membership) => membership.status === "active").length,
     };
@@ -209,6 +288,7 @@ export async function listAdminWorkspaces({ keyword = "" }: { keyword?: string }
   // from a bug report, so all four match the same box.
   const matches = keywordRegex(trimmed);
   return rows.filter((row) => matches.test(row.name) || matches.test(row.id)
+    || matches.test(plans[row.subscription.planKey].label)
     || (row.owner ? matches.test(row.owner.name) || matches.test(row.owner.email) : false));
 }
 
@@ -236,7 +316,9 @@ export async function getAdminWorkspace(id: string): Promise<AdminWorkspaceDetai
   return {
     createdAt: organization.createdAt.toISOString(), features, id: organization._id.toHexString(), members, name: organization.name,
     owner: ownerMember ? { email: ownerMember.email, name: ownerMember.name } : null,
-    status: workspaceStatus(organization.status), userCount: members.filter((member) => member.status === "active").length, usage,
+    status: workspaceStatus(organization.status),
+    subscription: toSubscription(organization.subscription, organization.createdAt),
+    userCount: members.filter((member) => member.status === "active").length, usage,
   };
 }
 
@@ -382,6 +464,74 @@ export async function updateWorkspaceFeature(actor: Pick<PlatformAdminActor, "id
       );
       return true;
     },
+  );
+}
+
+export type SubscriptionChange = {
+  currentPeriodEnd?: string | null;
+  note?: string | null;
+  planKey?: PlanKey;
+  status?: SubscriptionStatus;
+  trialEndsAt?: string | null;
+};
+
+function parseDateInput(value: string | null | undefined) {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+/**
+ * Records what a company is subscribed to. Changing a plan grants or removes
+ * nothing on its own — feature switches and workspace status stay the only
+ * things that gate access — so this is bookkeeping that the platform admin can
+ * see and the audit log remembers.
+ */
+export async function updateWorkspaceSubscription(
+  actor: Pick<PlatformAdminActor, "id">,
+  workspaceId: string,
+  change: SubscriptionChange,
+) {
+  if (!ObjectId.isValid(workspaceId)) return false;
+  await preparePlatformAdminCollections();
+  const organizationId = new ObjectId(workspaceId);
+  const database = await getDatabase();
+  const organizations = database.collection<OrganizationDocument>("organizations");
+  const existing = await organizations.findOne({ _id: organizationId });
+  if (!existing) return false;
+
+  const current = toSubscription(existing.subscription, existing.createdAt);
+  const next: WorkspaceSubscriptionDocument = {
+    planKey: change.planKey ?? current.planKey,
+    startedAt: existing.subscription?.startedAt ?? existing.createdAt,
+    status: change.status ?? current.status,
+    ...(existing.subscription?.externalCustomerId ? { externalCustomerId: existing.subscription.externalCustomerId } : {}),
+    ...(existing.subscription?.externalSubscriptionId ? { externalSubscriptionId: existing.subscription.externalSubscriptionId } : {}),
+  };
+  const trialEndsAt = change.trialEndsAt === undefined ? parseDateInput(current.trialEndsAt) : parseDateInput(change.trialEndsAt);
+  const currentPeriodEnd = change.currentPeriodEnd === undefined ? parseDateInput(current.currentPeriodEnd) : parseDateInput(change.currentPeriodEnd);
+  const note = change.note === undefined ? current.note : (change.note?.trim() || null);
+  if (trialEndsAt) next.trialEndsAt = trialEndsAt;
+  if (currentPeriodEnd) next.currentPeriodEnd = currentPeriodEnd;
+  if (note) next.note = note;
+
+  // One action per kind of change, so the audit log reads as what happened
+  // rather than as an opaque "subscription updated".
+  const action: PlatformAuditAction = change.planKey && change.planKey !== current.planKey
+    ? "SUBSCRIPTION_PLAN_CHANGED"
+    : change.status && change.status !== current.status
+      ? "SUBSCRIPTION_STATUS_CHANGED"
+      : "SUBSCRIPTION_DATES_CHANGED";
+
+  return auditedMutation(
+    {
+      action, actorId: new ObjectId(actor.id), actorKind: "platformAdmin",
+      metadata: { fromPlan: current.planKey, fromStatus: current.status, toPlan: next.planKey, toStatus: next.status },
+      targetId: workspaceId, targetType: "workspace",
+    },
+    async (session) => (await organizations.updateOne(
+      { _id: organizationId }, { $set: { subscription: next } }, { session },
+    )).matchedCount > 0,
   );
 }
 
