@@ -10,14 +10,17 @@ import { SubscriptionControls } from "@/components/admin/subscription-controls";
 import { WorkspaceControls } from "@/components/admin/workspace-controls";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { getAdminWorkspace } from "@/lib/platform-admin";
-import { planLabel, roleLabel } from "@/lib/status";
-import { allowanceState, hasDrift, plans } from "@/lib/subscription";
+import { roleLabel } from "@/lib/status";
+import { formatPlanPrice, listPlans, resolvePlan } from "@/lib/plans";
+import { allowanceState, hasDrift, priceDiverged } from "@/lib/subscription";
 import { featureLabel } from "@/lib/status";
 
 export default async function WorkspaceDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const workspace = await getAdminWorkspace(id);
+  const [workspace, plans] = await Promise.all([getAdminWorkspace(id), listPlans()]);
   if (!workspace) notFound();
+  const plan = resolvePlan(new Map(plans.map((entry) => [entry.key, entry])), workspace.subscription.planKey);
+  const recordedPrice = workspace.subscription.priceCents;
 
   return (
     <div className="page page-wide">
@@ -54,7 +57,18 @@ export default async function WorkspaceDetailPage({ params }: { params: Promise<
         >
           <SummaryList
             items={[
-              { label: "目前方案", value: planLabel(workspace.subscription.planKey) },
+              { label: "目前方案", value: plan.label },
+              {
+                label: "記錄的月費",
+                value:
+                  recordedPrice === null
+                    ? "尚未定價"
+                    : `${formatPlanPrice(recordedPrice, workspace.subscription.priceCurrency ?? plan.currency)}${
+                        priceDiverged(workspace.subscription, plan)
+                          ? `（此方案目前為 ${formatPlanPrice(plan.priceCents, plan.currency)}）`
+                          : ""
+                      }`,
+              },
               { label: "訂閱狀態", value: <StatusBadge domain="subscription" value={workspace.subscription.status} /> },
               { label: "試用到期", value: workspace.subscription.trialEndsAt ? formatDate(workspace.subscription.trialEndsAt) : "無試用期" },
               { label: "本期到期", value: workspace.subscription.currentPeriodEnd ? formatDate(workspace.subscription.currentPeriodEnd) : "尚未開始收費" },
@@ -84,9 +98,9 @@ export default async function WorkspaceDetailPage({ params }: { params: Promise<
               {/* Receipts and quotations are counted per month; members are a
                   standing headcount, so each says which it is. */}
               {([
-                ["收據", "本月", workspace.usage.thisMonth.receipts, plans[workspace.subscription.planKey].allowances.receiptsPerMonth],
-                ["報價單", "本月", workspace.usage.thisMonth.quotations, plans[workspace.subscription.planKey].allowances.quotationsPerMonth],
-                ["成員", "目前", workspace.userCount, plans[workspace.subscription.planKey].allowances.members],
+                ["收據", "本月", workspace.usage.thisMonth.receipts, plan.allowances.receiptsPerMonth],
+                ["報價單", "本月", workspace.usage.thisMonth.quotations, plan.allowances.quotationsPerMonth],
+                ["成員", "目前", workspace.userCount, plan.allowances.members],
               ] as const).map(([label, period, used, allowance]) => {
                 const state = allowanceState(used, allowance);
                 return (
@@ -108,6 +122,7 @@ export default async function WorkspaceDetailPage({ params }: { params: Promise<
           </div>
           <div style={{ marginTop: 16 }}>
             <SubscriptionControls
+              plans={plans}
               subscription={workspace.subscription}
               workspaceId={workspace.id}
               workspaceName={workspace.name}

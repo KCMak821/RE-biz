@@ -7,8 +7,8 @@ import { Button } from "@/components/app/button";
 import { useConfirm } from "@/components/app/confirm";
 import { notify } from "@/components/app/toast";
 import { request } from "@/lib/api";
-import { planLabel } from "@/lib/status";
-import { plans, planKeys, subscriptionStatuses, type PlanKey, type SubscriptionStatus, type WorkspaceSubscription } from "@/lib/subscription";
+import type { Plan } from "@/lib/plan-types";
+import { subscriptionStatuses, type PlanKey, type SubscriptionStatus, type WorkspaceSubscription } from "@/lib/subscription";
 import { status as statusDescriptor } from "@/lib/status";
 
 /**
@@ -18,14 +18,23 @@ import { status as statusDescriptor } from "@/lib/status";
  * entitlement change that will not happen.
  */
 export function SubscriptionControls({
+  plans,
   subscription,
   workspaceId,
   workspaceName,
 }: {
+  /** Assignable plans, newest pricing included. Archived ones are not offered. */
+  plans: Plan[];
   subscription: WorkspaceSubscription;
   workspaceId: string;
   workspaceName: string;
 }) {
+  const planByKey = new Map(plans.map((plan) => [plan.key, plan]));
+  const planLabel = (key: string) => planByKey.get(key)?.label ?? key;
+  // Archived plans are withdrawn from new assignments, but a company already on
+  // one keeps it listed — otherwise saving an unrelated field would silently
+  // move them onto a different plan.
+  const assignable = plans.filter((plan) => !plan.archived || plan.key === subscription.planKey);
   const router = useRouter();
   const confirm = useConfirm();
   const [pending, setPending] = useState(false);
@@ -33,12 +42,14 @@ export function SubscriptionControls({
   const [state, setState] = useState<SubscriptionStatus>(subscription.status);
   const [trialEndsAt, setTrialEndsAt] = useState(subscription.trialEndsAt?.slice(0, 10) ?? "");
   const [currentPeriodEnd, setCurrentPeriodEnd] = useState(subscription.currentPeriodEnd?.slice(0, 10) ?? "");
+  const [customerId, setCustomerId] = useState(subscription.externalCustomerId ?? "");
 
   const dirty =
     planKey !== subscription.planKey ||
     state !== subscription.status ||
     trialEndsAt !== (subscription.trialEndsAt?.slice(0, 10) ?? "") ||
-    currentPeriodEnd !== (subscription.currentPeriodEnd?.slice(0, 10) ?? "");
+    currentPeriodEnd !== (subscription.currentPeriodEnd?.slice(0, 10) ?? "") ||
+    customerId !== (subscription.externalCustomerId ?? "");
 
   async function save() {
     if (planKey !== subscription.planKey) {
@@ -57,6 +68,7 @@ export function SubscriptionControls({
       await request(`/api/admin/workspaces/${workspaceId}/subscription`, {
         body: JSON.stringify({
           currentPeriodEnd: currentPeriodEnd || null,
+          externalCustomerId: customerId.trim() || null,
           planKey,
           status: state,
           trialEndsAt: trialEndsAt || null,
@@ -77,7 +89,7 @@ export function SubscriptionControls({
       <div className="admin-feature-row">
         <div>
           <strong>方案</strong>
-          <span>{plans[planKey].description}</span>
+          <span>{planByKey.get(planKey)?.description ?? "這個方案已不在提供中。"}</span>
         </div>
         <div className="toolbar-select">
           <label className="sr-only" htmlFor="subscription-plan">
@@ -89,9 +101,9 @@ export function SubscriptionControls({
             onChange={(event) => setPlanKey(event.target.value as PlanKey)}
             value={planKey}
           >
-            {planKeys.map((key) => (
-              <option key={key} value={key}>
-                {plans[key].label}
+            {assignable.map((plan) => (
+              <option key={plan.key} value={plan.key}>
+                {plan.archived ? `${plan.label}（已封存）` : plan.label}
               </option>
             ))}
           </select>
@@ -156,6 +168,30 @@ export function SubscriptionControls({
             onChange={(event) => setCurrentPeriodEnd(event.target.value)}
             type="date"
             value={currentPeriodEnd}
+          />
+        </div>
+      </div>
+
+      <div className="admin-feature-row">
+        <div>
+          <strong>Stripe 客戶 ID</strong>
+          <span>
+            填入後，Stripe 的訂閱事件才找得到這間公司並自動更新訂閱狀態。留空則完全由人工維護。
+            {subscription.externalSubscriptionId
+              ? `目前的訂閱：${subscription.externalSubscriptionId}。`
+              : ""}
+          </span>
+        </div>
+        <div className="toolbar-select">
+          <label className="sr-only" htmlFor="subscription-customer">
+            Stripe 客戶 ID
+          </label>
+          <input
+            className="control"
+            id="subscription-customer"
+            onChange={(event) => setCustomerId(event.target.value)}
+            placeholder="cus_..."
+            value={customerId}
           />
         </div>
       </div>

@@ -5,8 +5,8 @@ import { ListCard } from "@/components/app/data-table";
 import { EmptyState } from "@/components/app/empty-state";
 import { PageHeader } from "@/components/app/page-header";
 import { listAdminWorkspaces } from "@/lib/platform-admin";
-import { planLabel } from "@/lib/status";
-import { allowanceState, plans } from "@/lib/subscription";
+import { plansByKey, resolvePlan } from "@/lib/plans";
+import { allowanceState } from "@/lib/subscription";
 
 export const metadata: Metadata = { title: "使用量｜RE-Biz 平台管理" };
 
@@ -18,9 +18,9 @@ function allowanceCell(used: number, allowance: number | null) {
 }
 
 export default async function UsagePage() {
-  const rows = await listAdminWorkspaces();
+  const [rows, plans] = await Promise.all([listAdminWorkspaces(), plansByKey()]);
   const over = rows.filter((workspace) => {
-    const allowances = plans[workspace.subscription.planKey].allowances;
+    const allowances = resolvePlan(plans, workspace.subscription.planKey).allowances;
     return allowanceState(workspace.usage.thisMonth.receipts, allowances.receiptsPerMonth).over
       || allowanceState(workspace.usage.thisMonth.quotations, allowances.quotationsPerMonth).over
       || allowanceState(workspace.userCount, allowances.members).over;
@@ -59,7 +59,8 @@ export default async function UsagePage() {
               </thead>
               <tbody>
                 {rows.map((workspace) => {
-                  const allowances = plans[workspace.subscription.planKey].allowances;
+                  const plan = resolvePlan(plans, workspace.subscription.planKey);
+                  const allowances = plan.allowances;
                   return (
                     <tr key={workspace.id}>
                       <td>
@@ -67,7 +68,7 @@ export default async function UsagePage() {
                           {workspace.name}
                         </Link>
                       </td>
-                      <td>{planLabel(workspace.subscription.planKey)}</td>
+                      <td>{plan.label}</td>
                       <td className="is-end">{allowanceCell(workspace.usage.thisMonth.receipts, allowances.receiptsPerMonth)}</td>
                       <td className="is-end">{allowanceCell(workspace.usage.thisMonth.quotations, allowances.quotationsPerMonth)}</td>
                       <td className="is-end">{allowanceCell(workspace.userCount, allowances.members)}</td>

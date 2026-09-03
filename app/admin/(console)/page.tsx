@@ -8,8 +8,7 @@ import { Card, Stat, Stats, SummaryList } from "@/components/app/surfaces";
 import { attentionReasonLabel, auditActionLabel, auditMetadataLabel, auditResultLabel, auditTargetLabel } from "@/components/admin/presentation";
 import { formatDateTime } from "@/lib/format";
 import { getPlatformOverview } from "@/lib/platform-admin";
-import { planLabel } from "@/lib/status";
-import { planKeys, subscriptionStatuses } from "@/lib/subscription";
+import { subscriptionStatuses } from "@/lib/subscription";
 import { status as statusDescriptor } from "@/lib/status";
 
 export const metadata: Metadata = { title: "平台總覽｜RE-Biz 平台管理" };
@@ -26,6 +25,8 @@ const cards = [
 
 export default async function AdminOverviewPage() {
   const overview = await getPlatformOverview();
+  const planLabels = new Map(overview.subscriptions.plans.map((plan) => [plan.key, plan.label]));
+  const planLabelFor = (key: string) => planLabels.get(key) ?? key;
 
   return (
     <div className="page page-wide">
@@ -72,7 +73,7 @@ export default async function AdminOverviewPage() {
                         {row.name}
                       </Link>
                     </td>
-                    <td>{planLabel(row.planKey)}</td>
+                    <td>{planLabelFor(row.planKey)}</td>
                     <td>{row.reasons.map(attentionReasonLabel).join("；")}</td>
                   </tr>
                 ))}
@@ -96,9 +97,9 @@ export default async function AdminOverviewPage() {
               依方案
             </h3>
             <SummaryList
-              items={planKeys.map((key) => ({
-                label: planLabel(key),
-                value: `${overview.subscriptions.byPlan[key].toLocaleString()} 間公司`,
+              items={overview.subscriptions.plans.map((plan) => ({
+                label: plan.archived ? `${plan.label}（已封存）` : plan.label,
+                value: `${(overview.subscriptions.byPlan[plan.key] ?? 0).toLocaleString()} 間公司`,
               }))}
             />
           </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, BarChart3, Building2, LayoutDashboard, Users } from "lucide-react";
+import { Activity, BarChart3, Building2, LayoutDashboard, Tags, Users } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -9,6 +9,7 @@ const items = [
   { href: "/admin/workspaces", icon: Building2, label: "工作區" },
   { href: "/admin/users", icon: Users, label: "使用者" },
   { href: "/admin/usage", icon: BarChart3, label: "使用量" },
+  { href: "/admin/plans", icon: Tags, label: "方案與定價" },
   { href: "/admin/audit-logs", icon: Activity, label: "操作紀錄" },
 ];
 

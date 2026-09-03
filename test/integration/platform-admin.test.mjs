@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, createHmac, randomBytes } from "node:crypto";
 import { once } from "node:events";
 import { createServer } from "node:net";
 import { fileURLToPath } from "node:url";
@@ -78,6 +78,60 @@ const quotePayload = {
   terms: "",
   validUntil: "2026-09-30",
 };
+
+const planPayload = {
+  allowances: { members: 5, quotationsPerMonth: 50, receiptsPerMonth: 100 },
+  currency: "HKD",
+  description: "Created by the test",
+  features: ["receipts", "quotations"],
+  isDefault: false,
+  label: "測試方案",
+  priceCents: 12345,
+  sortOrder: 40,
+};
+
+/**
+ * Stripe signs webhooks with an HMAC over the raw body, so a genuine signature
+ * can be produced here without a Stripe account or any network access.
+ */
+const stripeWebhookSecret = "whsec_test_secret_for_integration_tests";
+
+function stripeSignature(payload, timestampSeconds) {
+  const signature = createHmac("sha256", stripeWebhookSecret)
+    .update(`${timestampSeconds}.${payload}`)
+    .digest("hex");
+  return `t=${timestampSeconds},v1=${signature}`;
+}
+
+async function postStripeEvent(event, { signed = true, timestampSeconds } = {}) {
+  const payload = JSON.stringify(event);
+  const timestamp = timestampSeconds ?? Math.floor(Date.now() / 1000);
+  const response = await fetch(`${baseUrl}/api/stripe/webhook`, {
+    body: payload,
+    headers: {
+      "content-type": "application/json",
+      "stripe-signature": signed ? stripeSignature(payload, timestamp) : "t=1,v1=deadbeef",
+    },
+    method: "POST",
+  });
+  return { body: await response.json().catch(() => null), response };
+}
+
+function subscriptionEvent({ customerId, eventId, priceId, status }) {
+  return {
+    data: {
+      object: {
+        current_period_end: Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 30,
+        customer: customerId,
+        id: "sub_test_1",
+        items: { data: [{ price: { id: priceId } }] },
+        status,
+      },
+    },
+    id: eventId,
+    type: "customer.subscription.updated",
+  };
+}
 
 function sessionHash(token) {
   return createHash("sha256").update(token).digest("hex");
@@ -189,6 +243,36 @@ async function seedFixtures() {
       passwordHash: "not-used-by-session-tests",
     },
   ]);
+  await database.collection("plans").insertMany([
+    {
+      _id: "free",
+      allowances: { members: 2, quotationsPerMonth: 10, receiptsPerMonth: 20 },
+      archived: false,
+      createdAt: now,
+      currency: "HKD",
+      description: "Seeded free plan",
+      features: ["receipts", "accounting"],
+      isDefault: true,
+      label: "免費",
+      priceCents: 0,
+      sortOrder: 10,
+      updatedAt: now,
+    },
+    {
+      _id: "pro",
+      allowances: { members: null, quotationsPerMonth: null, receiptsPerMonth: null },
+      archived: false,
+      createdAt: now,
+      currency: "HKD",
+      description: "Seeded pro plan",
+      features: ["receipts", "accounting", "quotations", "invoices"],
+      isDefault: false,
+      label: "專業",
+      priceCents: 19900,
+      sortOrder: 30,
+      updatedAt: now,
+    },
+  ]);
   await database.collection("organizations").insertMany([
     {
       _id: workspaceAId,
@@ -292,6 +376,7 @@ before(async () => {
         MONGODB_DB: databaseName,
         MONGODB_URI: mongoUri,
         NEXT_TELEMETRY_DISABLED: "1",
+        STRIPE_WEBHOOK_SECRET: stripeWebhookSecret,
       },
       stdio: ["ignore", "pipe", "pipe"],
     },
@@ -940,11 +1025,20 @@ test(
   "the subscription endpoint rejects unknown plans and non-admins",
   { concurrency: false },
   async () => {
-    const badPlan = await request(
+    // A well-formed key that names no plan is a 404: whether a plan exists is
+    // decided against the stored plans, not by the schema.
+    const missingPlan = await request(
       `/api/admin/workspaces/${fixture.workspaceAId}/subscription`,
       { adminToken: fixture.adminToken, body: { planKey: "enterprise" }, method: "PATCH" },
     );
-    assert.equal(badPlan.response.status, 400);
+    assert.equal(missingPlan.response.status, 404);
+
+    // A malformed key never reaches the lookup.
+    const malformedPlan = await request(
+      `/api/admin/workspaces/${fixture.workspaceAId}/subscription`,
+      { adminToken: fixture.adminToken, body: { planKey: "Not A Key!" }, method: "PATCH" },
+    );
+    assert.equal(malformedPlan.response.status, 400);
 
     const asCustomer = await request(
       `/api/admin/workspaces/${fixture.workspaceAId}/subscription`,
@@ -1077,6 +1171,260 @@ test(
         method: "PATCH",
       });
     }
+  },
+);
+
+test(
+  "plans are stored data: they can be created and priced from the admin",
+  { concurrency: false },
+  async () => {
+    const created = await request("/api/admin/plans", {
+      adminToken: fixture.adminToken,
+      body: { ...planPayload, key: "test-plan" },
+      method: "POST",
+    });
+    assert.equal(created.response.status, 200);
+
+    const list = await request("/api/admin/plans", { adminToken: fixture.adminToken });
+    const plan = list.body.plans.find((entry) => entry.key === "test-plan");
+    assert.ok(plan, "expected the new plan in the list");
+    assert.equal(plan.priceCents, 12345);
+    assert.equal(plan.workspaceCount, 0);
+
+    // Raising the price is an edit, not a deploy.
+    const repriced = await request("/api/admin/plans/test-plan", {
+      adminToken: fixture.adminToken,
+      body: { ...planPayload, priceCents: 25000 },
+      method: "PATCH",
+    });
+    assert.equal(repriced.response.status, 200);
+    const afterEdit = await request("/api/admin/plans", { adminToken: fixture.adminToken });
+    assert.equal(
+      afterEdit.body.plans.find((entry) => entry.key === "test-plan").priceCents,
+      25000,
+    );
+
+    const logs = await request("/api/admin/audit-logs", { adminToken: fixture.adminToken });
+    assert.ok(logs.body.auditLogs.some((log) => log.action === "PLAN_CREATED"));
+    const updated = logs.body.auditLogs.find((log) => log.action === "PLAN_UPDATED");
+    assert.equal(updated.metadata.fromPriceCents, 12345);
+    assert.equal(updated.metadata.toPriceCents, 25000);
+  },
+);
+
+test(
+  "repricing a plan does not rewrite what existing companies are recorded at",
+  { concurrency: false },
+  async () => {
+    // Put Workspace B on "pro" at its current price.
+    await request(`/api/admin/workspaces/${fixture.workspaceBId}/subscription`, {
+      adminToken: fixture.adminToken,
+      body: { planKey: "pro" },
+      method: "PATCH",
+    });
+    const before = await request(`/api/admin/workspaces/${fixture.workspaceBId}`, {
+      adminToken: fixture.adminToken,
+    });
+    assert.equal(before.body.workspace.subscription.priceCents, 19900);
+
+    await request("/api/admin/plans/pro", {
+      adminToken: fixture.adminToken,
+      body: {
+        allowances: { members: null, quotationsPerMonth: null, receiptsPerMonth: null },
+        currency: "HKD",
+        description: "Seeded pro plan",
+        features: ["receipts", "accounting", "quotations", "invoices"],
+        isDefault: false,
+        label: "專業",
+        priceCents: 29900,
+        sortOrder: 30,
+      },
+      method: "PATCH",
+    });
+
+    // The company keeps the price it was put on; only the plan moved.
+    const after = await request(`/api/admin/workspaces/${fixture.workspaceBId}`, {
+      adminToken: fixture.adminToken,
+    });
+    assert.equal(after.body.workspace.subscription.priceCents, 19900);
+    assert.equal(after.body.workspace.subscription.planKey, "pro");
+
+    await request(`/api/admin/workspaces/${fixture.workspaceBId}/subscription`, {
+      adminToken: fixture.adminToken,
+      body: { planKey: "free" },
+      method: "PATCH",
+    });
+  },
+);
+
+test(
+  "the default plan cannot be archived and archived plans cannot be assigned",
+  { concurrency: false },
+  async () => {
+    const archiveDefault = await request("/api/admin/plans/free", {
+      adminToken: fixture.adminToken,
+      body: { archived: true },
+      method: "PATCH",
+    });
+    assert.equal(archiveDefault.response.status, 409);
+
+    await request("/api/admin/plans/test-plan", {
+      adminToken: fixture.adminToken,
+      body: { archived: true },
+      method: "PATCH",
+    });
+    const assignArchived = await request(
+      `/api/admin/workspaces/${fixture.workspaceAId}/subscription`,
+      { adminToken: fixture.adminToken, body: { planKey: "test-plan" }, method: "PATCH" },
+    );
+    assert.equal(assignArchived.response.status, 404);
+
+    // Archiving withdraws a plan; it never deletes it.
+    const list = await request("/api/admin/plans", { adminToken: fixture.adminToken });
+    assert.equal(list.body.plans.find((entry) => entry.key === "test-plan").archived, true);
+  },
+);
+
+test(
+  "plan endpoints are closed to customers",
+  { concurrency: false },
+  async () => {
+    const read = await request("/api/admin/plans", { token: fixture.userAToken });
+    assert.equal(read.response.status, 403);
+    const write = await request("/api/admin/plans", {
+      body: { ...planPayload, label: "Nope" },
+      method: "POST",
+      token: fixture.userAToken,
+    });
+    assert.equal(write.response.status, 403);
+  },
+);
+
+test(
+  "the Stripe webhook refuses anything it cannot verify",
+  { concurrency: false },
+  async () => {
+    const event = subscriptionEvent({
+      customerId: "cus_unlinked",
+      eventId: "evt_bad_signature",
+      priceId: "price_pro",
+      status: "active",
+    });
+
+    const forged = await postStripeEvent(event, { signed: false });
+    assert.equal(forged.response.status, 400);
+
+    // A genuine signature from hours ago is a replay, not a valid request.
+    const stale = await postStripeEvent(event, {
+      timestampSeconds: Math.floor(Date.now() / 1000) - 60 * 60,
+    });
+    assert.equal(stale.response.status, 400);
+
+    // Nothing was recorded by either attempt.
+    assert.equal(await database.collection("stripeEvents").countDocuments({ _id: "evt_bad_signature" }), 0);
+  },
+);
+
+test(
+  "a verified Stripe event only reaches a company that was deliberately linked",
+  { concurrency: false },
+  async () => {
+    const unmatched = await postStripeEvent(
+      subscriptionEvent({
+        customerId: "cus_never_linked",
+        eventId: "evt_no_match",
+        priceId: "price_pro",
+        status: "active",
+      }),
+    );
+    // Acknowledged, because Stripe retries anything else forever.
+    assert.equal(unmatched.response.status, 200);
+    assert.equal(unmatched.body.outcome, "no_match");
+  },
+);
+
+test(
+  "Stripe drives the recorded subscription but never suspends anyone",
+  { concurrency: false },
+  async () => {
+    await database.collection("plans").updateOne(
+      { _id: "pro" },
+      { $set: { stripePriceId: "price_pro_monthly" } },
+    );
+    await request(`/api/admin/workspaces/${fixture.workspaceAId}/subscription`, {
+      adminToken: fixture.adminToken,
+      body: { externalCustomerId: "cus_workspace_a" },
+      method: "PATCH",
+    });
+
+    const failed = await postStripeEvent({
+      data: { object: { customer: "cus_workspace_a", id: "in_1", subscription: "sub_a" } },
+      id: "evt_payment_failed",
+      type: "invoice.payment_failed",
+    });
+    assert.equal(failed.body.outcome, "applied");
+
+    const afterFailure = await request(`/api/admin/workspaces/${fixture.workspaceAId}`, {
+      adminToken: fixture.adminToken,
+    });
+    assert.equal(afterFailure.body.workspace.subscription.status, "past_due");
+    // The whole point: a failed payment is a note for a human, not a cut-off.
+    assert.equal(afterFailure.body.workspace.status, "active");
+    const stillWorks = await request("/api/receipts", { token: fixture.userAToken });
+    assert.equal(stillWorks.response.status, 200);
+
+    // A subscription event carrying a mapped price moves the plan too.
+    const activated = await postStripeEvent(
+      subscriptionEvent({
+        customerId: "cus_workspace_a",
+        eventId: "evt_now_active",
+        priceId: "price_pro_monthly",
+        status: "active",
+      }),
+    );
+    assert.equal(activated.body.outcome, "applied");
+    const afterActive = await request(`/api/admin/workspaces/${fixture.workspaceAId}`, {
+      adminToken: fixture.adminToken,
+    });
+    assert.equal(afterActive.body.workspace.subscription.status, "active");
+    assert.equal(afterActive.body.workspace.subscription.planKey, "pro");
+    assert.equal(afterActive.body.workspace.subscription.externalSubscriptionId, "sub_test_1");
+
+    // Stripe redelivers; the second copy must change nothing.
+    const replay = await postStripeEvent(
+      subscriptionEvent({
+        customerId: "cus_workspace_a",
+        eventId: "evt_now_active",
+        priceId: "price_pro_monthly",
+        status: "canceled",
+      }),
+    );
+    assert.equal(replay.body.outcome, "duplicate");
+    const afterReplay = await request(`/api/admin/workspaces/${fixture.workspaceAId}`, {
+      adminToken: fixture.adminToken,
+    });
+    assert.equal(afterReplay.body.workspace.subscription.status, "active");
+
+    // Restore the fixture for the tests that follow.
+    await request(`/api/admin/workspaces/${fixture.workspaceAId}/subscription`, {
+      adminToken: fixture.adminToken,
+      body: { externalCustomerId: null, planKey: "free", status: "active" },
+      method: "PATCH",
+    });
+  },
+);
+
+test(
+  "an unrecognised Stripe event is acknowledged and changes nothing",
+  { concurrency: false },
+  async () => {
+    const result = await postStripeEvent({
+      data: { object: { id: "cs_test" } },
+      id: "evt_unknown_type",
+      type: "checkout.session.completed",
+    });
+    assert.equal(result.response.status, 200);
+    assert.equal(result.body.ignored, true);
   },
 );
 

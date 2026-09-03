@@ -3,13 +3,13 @@ import { ObjectId } from "mongodb";
 import { getDatabase } from "@/lib/mongodb";
 
 /**
- * Workspace feature switches, in their own module so `lib/auth` can read them
- * for the session without importing `lib/platform-admin` (which imports auth
- * back).
+ * Reading and writing workspace feature switches. Lives apart from
+ * `lib/platform-admin` so `lib/auth` can read switches for the session without
+ * importing platform-admin (which imports auth back). The vocabulary itself is
+ * in `lib/workspace-feature-keys`, which carries no database.
  */
-export const workspaceFeatureKeys = ["receipts", "accounting", "quotations", "invoices"] as const;
-export type WorkspaceFeatureKey = (typeof workspaceFeatureKeys)[number];
-export type WorkspaceFeatures = Record<WorkspaceFeatureKey, boolean>;
+export { defaultWorkspaceFeatures, workspaceFeatureKeys, type WorkspaceFeatureKey, type WorkspaceFeatures } from "@/lib/workspace-feature-keys";
+import { defaultWorkspaceFeatures, workspaceFeatureKeys, type WorkspaceFeatureKey, type WorkspaceFeatures } from "@/lib/workspace-feature-keys";
 
 export type WorkspaceFeatureDocument = {
   createdAt: Date;
@@ -21,11 +21,6 @@ export type WorkspaceFeatureDocument = {
 
 export function workspaceFeaturesCollection(database: Awaited<ReturnType<typeof getDatabase>>) {
   return database.collection<WorkspaceFeatureDocument>("workspaceFeatures");
-}
-
-/** Features default to on: a workspace with no rows has everything available. */
-export function defaultWorkspaceFeatures(): WorkspaceFeatures {
-  return { accounting: true, invoices: true, quotations: true, receipts: true };
 }
 
 export async function readWorkspaceFeatures(organizationId: ObjectId): Promise<WorkspaceFeatures> {

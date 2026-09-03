@@ -8,8 +8,9 @@ import { PageHeader } from "@/components/app/page-header";
 import { StatusBadge } from "@/components/app/status-badge";
 import { formatDate } from "@/lib/format";
 import { listAdminWorkspaces } from "@/lib/platform-admin";
-import { planLabel, status as statusDescriptor } from "@/lib/status";
-import { hasDrift, planKeys, subscriptionStatuses } from "@/lib/subscription";
+import { status as statusDescriptor } from "@/lib/status";
+import { listPlans, resolvePlan } from "@/lib/plans";
+import { hasDrift, subscriptionStatuses } from "@/lib/subscription";
 
 export const metadata: Metadata = { title: "工作區｜RE-Biz 平台管理" };
 
@@ -20,7 +21,11 @@ export default async function WorkspacesPage({
 }) {
   const { plan = "", q, subscription = "" } = await searchParams;
   const keyword = q?.trim() ?? "";
-  const workspaces = await listAdminWorkspaces({ keyword, planKey: plan, subscriptionStatus: subscription });
+  const [workspaces, plans] = await Promise.all([
+    listAdminWorkspaces({ keyword, planKey: plan, subscriptionStatus: subscription }),
+    listPlans(),
+  ]);
+  const plansByKeyMap = new Map(plans.map((entry) => [entry.key, entry]));
   const filtered = Boolean(keyword || plan || subscription);
 
   return (
@@ -34,7 +39,10 @@ export default async function WorkspacesPage({
         action="/admin/workspaces"
         keyword={keyword}
         planKey={plan}
-        planOptions={planKeys.map((key) => ({ label: planLabel(key), value: key }))}
+        planOptions={plans.map((entry) => ({
+          label: entry.archived ? `${entry.label}（已封存）` : entry.label,
+          value: entry.key,
+        }))}
         resultLabel={filtered ? `符合條件的有 ${workspaces.length} 間` : undefined}
         statusOptions={subscriptionStatuses.map((key) => ({
           label: statusDescriptor("subscription", key).label,
@@ -81,7 +89,7 @@ export default async function WorkspacesPage({
                       )}
                     </td>
                     <td>
-                      {planLabel(workspace.subscription.planKey)}
+                      {resolvePlan(plansByKeyMap, workspace.subscription.planKey).label}
                       {hasDrift(workspace.drift) ? <small>功能與方案不一致</small> : null}
                     </td>
                     <td>

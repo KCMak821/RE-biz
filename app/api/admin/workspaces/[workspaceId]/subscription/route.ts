@@ -1,7 +1,8 @@
 import { z } from "zod";
 
 import { getCurrentSuperAdmin, updateWorkspaceSubscription } from "@/lib/platform-admin";
-import { planKeys, subscriptionStatuses } from "@/lib/subscription";
+import { planKeyPattern } from "@/lib/plans";
+import { subscriptionStatuses } from "@/lib/subscription";
 
 export const runtime = "nodejs";
 
@@ -13,8 +14,13 @@ const dateField = z.string().date().nullable().optional();
 
 const inputSchema = z.object({
   currentPeriodEnd: dateField,
+  // Linking a company to its Stripe customer is what lets a webhook find it.
+  externalCustomerId: z.string().trim().max(120).nullable().optional(),
+  externalSubscriptionId: z.string().trim().max(120).nullable().optional(),
   note: z.string().max(500).nullable().optional(),
-  planKey: z.enum(planKeys).optional(),
+  // Whether the plan actually exists is decided against the stored plans, not
+  // by this schema.
+  planKey: z.string().trim().regex(planKeyPattern).optional(),
   status: z.enum(subscriptionStatuses).optional(),
   trialEndsAt: dateField,
 }).strict();
@@ -29,7 +35,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ wo
     if (!actor) return Response.json({ message: "需要平台管理者權限。" }, { status: 403 });
     const { workspaceId } = await params;
     if (!await updateWorkspaceSubscription(actor, workspaceId, parsed.data)) {
-      return Response.json({ message: "工作區不存在。" }, { status: 404 });
+      return Response.json({ message: "工作區不存在，或指定的方案無法指派。" }, { status: 404 });
     }
     return Response.json({ subscription: parsed.data });
   } catch {

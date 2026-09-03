@@ -1,8 +1,10 @@
 import { ObjectId, type ClientSession, type Filter } from "mongodb";
 
 import { type AccountStatus, type OrganizationDocument, type UserDocument, type WorkspaceStatus, type WorkspaceSubscriptionDocument } from "@/lib/auth";
+import { isValidPlanKey, plansByKey, plansCollection, resolvePlan, type Plan, type PlanAllowances } from "@/lib/plans";
+import { type StripeSubscriptionUpdate } from "@/lib/stripe-webhook";
 import {
-  defaultPlanKey, expiryState, hasDrift, isPlanKey, isSubscriptionStatus, planDrift, planKeys, plans, subscriptionStatuses,
+  expiryState, hasDrift, isSubscriptionStatus, planDrift, subscriptionStatuses,
   type PlanDrift, type PlanKey, type SubscriptionStatus, type WorkspaceSubscription,
 } from "@/lib/subscription";
 import { getCurrentPlatformAdmin, type PlatformAdminActor, type PlatformAdminDocument } from "@/lib/platform-auth";
@@ -23,6 +25,11 @@ export const platformAuditActions = [
   "SUBSCRIPTION_PLAN_CHANGED",
   "SUBSCRIPTION_STATUS_CHANGED",
   "SUBSCRIPTION_DATES_CHANGED",
+  "PLAN_CREATED",
+  "PLAN_UPDATED",
+  "PLAN_ARCHIVED",
+  "PLAN_RESTORED",
+  "STRIPE_SUBSCRIPTION_SYNCED",
 ] as const;
 export type PlatformAuditAction = typeof platformAuditActions[number];
 
@@ -54,7 +61,7 @@ type PlatformAuditLogDocument = {
   createdAt: Date;
   metadata?: Record<string, boolean | number | string>;
   targetId: string;
-  targetType: "user" | "workspace" | "workspace_feature";
+  targetType: "plan" | "user" | "workspace" | "workspace_feature";
 };
 
 export type WorkspaceUsage = {
@@ -202,15 +209,17 @@ async function planBreakdown() {
     { $group: { _id: { planKey: "$subscription.planKey", status: "$subscription.status" }, count: { $sum: 1 } } },
   ]).toArray();
 
-  const byPlan = Object.fromEntries(planKeys.map((key) => [key, 0])) as Record<PlanKey, number>;
+  const plans = await plansByKey();
+  const byPlan = Object.fromEntries([...plans.keys()].map((key) => [key, 0])) as Record<string, number>;
   const byStatus = Object.fromEntries(subscriptionStatuses.map((key) => [key, 0])) as Record<SubscriptionStatus, number>;
   for (const row of rows) {
-    // Companies created before subscriptions read as the default plan, exactly
-    // as they do everywhere else.
-    byPlan[isPlanKey(row._id.planKey) ? row._id.planKey : defaultPlanKey] += row.count;
+    // Companies created before subscriptions, or pointing at a deleted plan,
+    // resolve to the default exactly as they do everywhere else.
+    const key = resolvePlan(plans, row._id.planKey).key;
+    byPlan[key] = (byPlan[key] ?? 0) + row.count;
     byStatus[isSubscriptionStatus(row._id.status) ? row._id.status : "active"] += row.count;
   }
-  return { byPlan, byStatus };
+  return { byPlan, byStatus, plans: [...plans.values()] };
 }
 
 function emptyUsage(): WorkspaceUsage {
@@ -227,13 +236,21 @@ function startOfThisMonth() {
  * A workspace with no subscription row predates subscriptions; it reads as the
  * default plan rather than as broken, so the admin never shows a blank.
  */
-function toSubscription(document: WorkspaceSubscriptionDocument | undefined, createdAt: Date): WorkspaceSubscription {
+function toSubscription(
+  document: WorkspaceSubscriptionDocument | undefined,
+  createdAt: Date,
+  plans: Map<string, Plan>,
+): WorkspaceSubscription {
   return {
     currentPeriodEnd: document?.currentPeriodEnd?.toISOString() ?? null,
     externalCustomerId: document?.externalCustomerId ?? null,
     externalSubscriptionId: document?.externalSubscriptionId ?? null,
     note: document?.note ?? null,
-    planKey: isPlanKey(document?.planKey) ? document.planKey : defaultPlanKey,
+    // A workspace pointing at a plan that has since been deleted resolves to
+    // the default rather than becoming unreadable.
+    planKey: resolvePlan(plans, document?.planKey).key,
+    priceCents: typeof document?.priceCents === "number" ? document.priceCents : null,
+    priceCurrency: document?.priceCurrency ?? null,
     startedAt: (document?.startedAt ?? createdAt).toISOString(),
     status: isSubscriptionStatus(document?.status) ? document.status : "active",
     trialEndsAt: document?.trialEndsAt?.toISOString() ?? null,
@@ -319,18 +336,19 @@ export async function listAdminWorkspaces({
   const userIds = memberships.map((membership) => membership.userId);
   const users = userIds.length ? await database.collection<UserDocument>("users").find({ _id: { $in: userIds } }, { projection: { email: 1, name: 1 } }).toArray() : [];
   const usersById = new Map(users.map((user) => [user._id.toHexString(), user]));
-  const [usage, featureMap] = await Promise.all([
+  const [usage, featureMap, plans] = await Promise.all([
     usageByWorkspace(organizationIds),
     featuresByWorkspace(organizationIds),
+    plansByKey(),
   ]);
   const rows = organizations.map((organization) => {
     const organizationMemberships = memberships.filter((membership) => membership.organizationId.equals(organization._id));
     const ownerMembership = organizationMemberships.find((membership) => membership.role === "owner");
     const owner = ownerMembership ? usersById.get(ownerMembership.userId.toHexString()) : undefined;
-    const subscription = toSubscription(organization.subscription, organization.createdAt);
+    const subscription = toSubscription(organization.subscription, organization.createdAt, plans);
     return {
       createdAt: organization.createdAt.toISOString(),
-      drift: planDrift(subscription.planKey, featureMap.get(organization._id.toHexString()) ?? defaultWorkspaceFeatures()),
+      drift: planDrift(resolvePlan(plans, subscription.planKey), featureMap.get(organization._id.toHexString()) ?? defaultWorkspaceFeatures()),
       id: organization._id.toHexString(),
       name: organization.name,
       owner: owner ? { email: owner.email, name: owner.name } : null,
@@ -341,7 +359,7 @@ export async function listAdminWorkspaces({
     };
   });
   const filtered = rows.filter((row) =>
-    (!isPlanKey(planKey) || row.subscription.planKey === planKey)
+    (!isValidPlanKey(planKey) || !plans.has(planKey) || row.subscription.planKey === planKey)
     && (!isSubscriptionStatus(subscriptionStatus) || row.subscription.status === subscriptionStatus));
   const trimmed = keyword.trim();
   if (!trimmed) return filtered;
@@ -349,7 +367,7 @@ export async function listAdminWorkspaces({
   // from a bug report, so all four match the same box.
   const matches = keywordRegex(trimmed);
   return filtered.filter((row) => matches.test(row.name) || matches.test(row.id)
-    || matches.test(plans[row.subscription.planKey].label)
+    || matches.test(resolvePlan(plans, row.subscription.planKey).label)
     || (row.owner ? matches.test(row.owner.name) || matches.test(row.owner.email) : false));
 }
 
@@ -373,16 +391,20 @@ export async function getAdminWorkspace(id: string): Promise<AdminWorkspaceDetai
     }] : [];
   });
   const ownerMember = members.find((member) => member.role === "owner");
-  const [usage, features] = await Promise.all([getWorkspaceUsage(organizationId), workspaceFeatureRows(organizationId)]);
-  const subscriptionForDrift = toSubscription(organization.subscription, organization.createdAt);
+  const [usage, features, plans] = await Promise.all([
+    getWorkspaceUsage(organizationId),
+    workspaceFeatureRows(organizationId),
+    plansByKey(),
+  ]);
+  const subscriptionForDrift = toSubscription(organization.subscription, organization.createdAt, plans);
   const enabledByKey = Object.fromEntries(features.map((row) => [row.featureKey, row.enabled])) as WorkspaceFeatures;
   return {
     createdAt: organization.createdAt.toISOString(),
-    drift: planDrift(subscriptionForDrift.planKey, enabledByKey),
+    drift: planDrift(resolvePlan(plans, subscriptionForDrift.planKey), enabledByKey),
     features, id: organization._id.toHexString(), members, name: organization.name,
     owner: ownerMember ? { email: ownerMember.email, name: ownerMember.name } : null,
     status: workspaceStatus(organization.status),
-    subscription: toSubscription(organization.subscription, organization.createdAt),
+    subscription: subscriptionForDrift,
     userCount: members.filter((member) => member.status === "active").length, usage,
   };
 }
@@ -534,6 +556,9 @@ export async function updateWorkspaceFeature(actor: Pick<PlatformAdminActor, "id
 
 export type SubscriptionChange = {
   currentPeriodEnd?: string | null;
+  /** Links this company to a Stripe customer, which is what lets webhooks find it. */
+  externalCustomerId?: string | null;
+  externalSubscriptionId?: string | null;
   note?: string | null;
   planKey?: PlanKey;
   status?: SubscriptionStatus;
@@ -565,14 +590,40 @@ export async function updateWorkspaceSubscription(
   const existing = await organizations.findOne({ _id: organizationId });
   if (!existing) return false;
 
-  const current = toSubscription(existing.subscription, existing.createdAt);
+  const plans = await plansByKey();
+  // An unknown or archived plan cannot be assigned: archived means "no longer
+  // offered", and companies already on it keep it.
+  if (change.planKey !== undefined) {
+    const target = plans.get(change.planKey);
+    if (!target || target.archived) return false;
+  }
+
+  const current = toSubscription(existing.subscription, existing.createdAt, plans);
+  const currentPlan = resolvePlan(plans, current.planKey);
+  const nextPlan = change.planKey ? resolvePlan(plans, change.planKey) : currentPlan;
   const next: WorkspaceSubscriptionDocument = {
-    planKey: change.planKey ?? current.planKey,
+    planKey: nextPlan.key,
     startedAt: existing.subscription?.startedAt ?? existing.createdAt,
     status: change.status ?? current.status,
-    ...(existing.subscription?.externalCustomerId ? { externalCustomerId: existing.subscription.externalCustomerId } : {}),
-    ...(existing.subscription?.externalSubscriptionId ? { externalSubscriptionId: existing.subscription.externalSubscriptionId } : {}),
   };
+  const externalCustomerId = change.externalCustomerId === undefined
+    ? current.externalCustomerId
+    : (change.externalCustomerId?.trim() || null);
+  const externalSubscriptionId = change.externalSubscriptionId === undefined
+    ? current.externalSubscriptionId
+    : (change.externalSubscriptionId?.trim() || null);
+  if (externalCustomerId) next.externalCustomerId = externalCustomerId;
+  if (externalSubscriptionId) next.externalSubscriptionId = externalSubscriptionId;
+  // Assigning a plan records the price as it stands today. Editing the plan
+  // later changes what new companies are put on, not what this one is recorded
+  // at — repricing an existing customer stays a deliberate act.
+  if (nextPlan.key !== current.planKey || current.priceCents === null) {
+    next.priceCents = nextPlan.priceCents;
+    next.priceCurrency = nextPlan.currency;
+  } else {
+    next.priceCents = current.priceCents;
+    next.priceCurrency = current.priceCurrency ?? nextPlan.currency;
+  }
   const trialEndsAt = change.trialEndsAt === undefined ? parseDateInput(current.trialEndsAt) : parseDateInput(change.trialEndsAt);
   const currentPeriodEnd = change.currentPeriodEnd === undefined ? parseDateInput(current.currentPeriodEnd) : parseDateInput(change.currentPeriodEnd);
   const note = change.note === undefined ? current.note : (change.note?.trim() || null);
@@ -582,7 +633,7 @@ export async function updateWorkspaceSubscription(
 
   // One action per kind of change, so the audit log reads as what happened
   // rather than as an opaque "subscription updated".
-  const action: PlatformAuditAction = change.planKey && change.planKey !== current.planKey
+  const action: PlatformAuditAction = nextPlan.key !== current.planKey
     ? "SUBSCRIPTION_PLAN_CHANGED"
     : change.status && change.status !== current.status
       ? "SUBSCRIPTION_STATUS_CHANGED"
@@ -591,13 +642,206 @@ export async function updateWorkspaceSubscription(
   return auditedMutation(
     {
       action, actorId: new ObjectId(actor.id), actorKind: "platformAdmin",
-      metadata: { fromPlan: current.planKey, fromStatus: current.status, toPlan: next.planKey, toStatus: next.status },
+      // Labels are stored alongside the keys: a plan can later be renamed or
+      // deleted, and history should still read as what happened at the time.
+      metadata: {
+        fromPlan: current.planKey, fromPlanLabel: currentPlan.label, fromStatus: current.status,
+        toPlan: next.planKey, toPlanLabel: nextPlan.label, toStatus: next.status,
+      },
       targetId: workspaceId, targetType: "workspace",
     },
     async (session) => (await organizations.updateOne(
       { _id: organizationId }, { $set: { subscription: next } }, { session },
     )).matchedCount > 0,
   );
+}
+
+export type PlanInput = {
+  allowances: PlanAllowances;
+  currency: string;
+  description: string;
+  features: WorkspaceFeatureKey[];
+  isDefault: boolean;
+  label: string;
+  priceCents: number;
+  sortOrder: number;
+  stripePriceId?: string;
+};
+
+/** How many companies sit on each plan, so archiving is never a blind act. */
+export async function planUsageCounts(): Promise<Record<string, number>> {
+  const database = await getDatabase();
+  const rows = await database.collection<OrganizationDocument>("organizations").aggregate<{ _id: string | null; count: number }>([
+    { $group: { _id: "$subscription.planKey", count: { $sum: 1 } } },
+  ]).toArray();
+  const plans = await plansByKey();
+  const counts: Record<string, number> = Object.fromEntries([...plans.keys()].map((key) => [key, 0]));
+  for (const row of rows) {
+    const key = resolvePlan(plans, row._id).key;
+    counts[key] = (counts[key] ?? 0) + row.count;
+  }
+  return counts;
+}
+
+/**
+ * Only one plan can be the default, so setting one clears the rest. Done in the
+ * same session as the write that set it, or a failure could leave the platform
+ * with two defaults — or none, which is worse.
+ */
+async function clearOtherDefaults(key: string, session?: ClientSession) {
+  await plansCollection(await getDatabase()).updateMany(
+    { _id: { $ne: key }, isDefault: true }, { $set: { isDefault: false } }, { session },
+  );
+}
+
+export async function createPlan(actor: Pick<PlatformAdminActor, "id">, key: string, input: PlanInput) {
+  if (!isValidPlanKey(key)) return false;
+  await preparePlatformAdminCollections();
+  const database = await getDatabase();
+  if (await plansCollection(database).findOne({ _id: key }, { projection: { _id: 1 } })) return false;
+
+  return auditedMutation(
+    {
+      action: "PLAN_CREATED", actorId: new ObjectId(actor.id), actorKind: "platformAdmin",
+      metadata: { label: input.label, priceCents: input.priceCents },
+      targetId: key, targetType: "plan",
+    },
+    async (session) => {
+      const now = new Date();
+      await plansCollection(database).insertOne(
+        { ...input, _id: key, archived: false, createdAt: now, updatedAt: now },
+        { session },
+      );
+      if (input.isDefault) await clearOtherDefaults(key, session);
+      return true;
+    },
+  );
+}
+
+export async function updatePlan(actor: Pick<PlatformAdminActor, "id">, key: string, input: PlanInput) {
+  if (!isValidPlanKey(key)) return false;
+  await preparePlatformAdminCollections();
+  const database = await getDatabase();
+  const existing = await plansCollection(database).findOne({ _id: key });
+  if (!existing) return false;
+  // The platform must always have somewhere to put a new company.
+  if (existing.isDefault && !input.isDefault) return false;
+
+  return auditedMutation(
+    {
+      action: "PLAN_UPDATED", actorId: new ObjectId(actor.id), actorKind: "platformAdmin",
+      metadata: {
+        fromPriceCents: existing.priceCents ?? 0, label: input.label, toPriceCents: input.priceCents,
+      },
+      targetId: key, targetType: "plan",
+    },
+    async (session) => {
+      await plansCollection(database).updateOne(
+        { _id: key }, { $set: { ...input, updatedAt: new Date() } }, { session },
+      );
+      if (input.isDefault) await clearOtherDefaults(key, session);
+      return true;
+    },
+  );
+}
+
+/**
+ * Archiving withdraws a plan from new assignments and keeps every company
+ * already on it exactly where they are. Plans are never deleted: subscriptions
+ * and audit rows refer to them, and history should stay readable.
+ */
+export async function setPlanArchived(actor: Pick<PlatformAdminActor, "id">, key: string, archived: boolean) {
+  if (!isValidPlanKey(key)) return false;
+  await preparePlatformAdminCollections();
+  const database = await getDatabase();
+  const existing = await plansCollection(database).findOne({ _id: key });
+  if (!existing) return false;
+  if (archived && existing.isDefault) return false;
+
+  return auditedMutation(
+    {
+      action: archived ? "PLAN_ARCHIVED" : "PLAN_RESTORED", actorId: new ObjectId(actor.id), actorKind: "platformAdmin",
+      metadata: { label: existing.label }, targetId: key, targetType: "plan",
+    },
+    async (session) => (await plansCollection(database).updateOne(
+      { _id: key }, { $set: { archived, updatedAt: new Date() } }, { session },
+    )).matchedCount > 0,
+  );
+}
+
+export type StripeSyncOutcome = "applied" | "duplicate" | "no_match";
+
+type StripeEventDocument = { _id: string; receivedAt: Date };
+
+/**
+ * Records what Stripe says about a company's subscription.
+ *
+ * Scope is deliberately narrow. This updates the recorded status, period end,
+ * plan and Stripe ids — and nothing else. It never suspends a workspace, never
+ * changes a feature switch and never touches customer data: a failed payment
+ * shows up as "past due" for a human to deal with, the same as an expired
+ * trial. Automatic cut-offs are a policy decision, not a webhook's job.
+ *
+ * The company is found by the Stripe customer id already recorded against it,
+ * so a webhook can only ever update a workspace that was deliberately linked.
+ */
+export async function applyStripeSubscription(update: StripeSubscriptionUpdate): Promise<StripeSyncOutcome> {
+  await preparePlatformAdminCollections();
+  const database = await getDatabase();
+  const events = database.collection<StripeEventDocument>("stripeEvents");
+  await events.createIndex({ receivedAt: 1 }, { expireAfterSeconds: 60 * 60 * 24 * 30 });
+
+  // Stripe retries until it gets a 2xx, so the same event can arrive twice.
+  try {
+    await events.insertOne({ _id: update.eventId, receivedAt: new Date() });
+  } catch (error) {
+    if (typeof error === "object" && error && "code" in error && error.code === 11000) return "duplicate";
+    throw error;
+  }
+
+  const organizations = database.collection<OrganizationDocument>("organizations");
+  const organization = await organizations.findOne({ "subscription.externalCustomerId": update.customerId });
+  if (!organization) return "no_match";
+
+  const plans = await plansByKey();
+  const current = toSubscription(organization.subscription, organization.createdAt, plans);
+  const mappedPlan = update.priceId
+    ? [...plans.values()].find((plan) => plan.stripePriceId === update.priceId) ?? null
+    : null;
+
+  const next: WorkspaceSubscriptionDocument = {
+    ...organization.subscription,
+    externalCustomerId: update.customerId,
+    planKey: mappedPlan?.key ?? current.planKey,
+    startedAt: organization.subscription?.startedAt ?? organization.createdAt,
+    status: update.status ?? current.status,
+  };
+  if (update.subscriptionId) next.externalSubscriptionId = update.subscriptionId;
+  if (update.currentPeriodEnd) next.currentPeriodEnd = new Date(update.currentPeriodEnd);
+  // Moving onto a plan through Stripe records that plan's price, the same as
+  // assigning it by hand would.
+  if (mappedPlan && mappedPlan.key !== current.planKey) {
+    next.priceCents = mappedPlan.priceCents;
+    next.priceCurrency = mappedPlan.currency;
+  }
+
+  await organizations.updateOne({ _id: organization._id }, { $set: { subscription: next } });
+  await writePlatformAuditLogBestEffort({
+    action: "STRIPE_SUBSCRIPTION_SYNCED",
+    // Stripe is the actor here, not a person; the organization's own id stands
+    // in so the row still resolves to something real.
+    actorId: organization._id,
+    actorKind: "legacyUser",
+    metadata: {
+      eventId: update.eventId,
+      fromStatus: current.status,
+      toPlan: next.planKey,
+      toStatus: next.status,
+    },
+    targetId: organization._id.toHexString(),
+    targetType: "workspace",
+  });
+  return "applied";
 }
 
 export async function updatePlatformUserStatus(actor: Pick<PlatformAdminActor, "id">, userId: string, status: AccountStatus) {

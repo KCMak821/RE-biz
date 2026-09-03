@@ -2,10 +2,15 @@
  * Audit-log vocabulary. Status, role and feature labels now live in
  * `lib/status.ts` so the admin and the workspace use the same words.
  */
-import { featureLabel, featureLabels, planLabel } from "@/lib/status";
+import { featureLabel, featureLabels } from "@/lib/status";
 import { status as statusDescriptor } from "@/lib/status";
 
 const auditActionLabels: Record<string, string> = {
+  PLAN_ARCHIVED: "封存方案",
+  PLAN_CREATED: "建立方案",
+  PLAN_RESTORED: "還原方案",
+  PLAN_UPDATED: "更新方案",
+  STRIPE_SUBSCRIPTION_SYNCED: "Stripe 同步訂閱",
   SUBSCRIPTION_DATES_CHANGED: "調整訂閱日期",
   SUBSCRIPTION_PLAN_CHANGED: "變更訂閱方案",
   SUBSCRIPTION_STATUS_CHANGED: "變更訂閱狀態",
@@ -18,6 +23,7 @@ const auditActionLabels: Record<string, string> = {
 };
 
 const auditTargetLabels: Record<string, string> = {
+  plan: "方案",
   user: "使用者帳號",
   workspace: "工作區",
   workspace_feature: "工作區功能",
@@ -57,8 +63,13 @@ export function auditMetadataLabel(metadata: unknown) {
     enabled?: unknown;
     featureKey?: unknown;
     fromPlan?: unknown;
+    fromPlanLabel?: unknown;
+    fromPriceCents?: unknown;
     fromStatus?: unknown;
+    label?: unknown;
     toPlan?: unknown;
+    toPlanLabel?: unknown;
+    toPriceCents?: unknown;
     toStatus?: unknown;
   };
   if (typeof value.featureKey === "string" && value.featureKey in featureLabels && typeof value.enabled === "boolean") {
@@ -68,8 +79,16 @@ export function auditMetadataLabel(metadata: unknown) {
   // went, because "moved to 專業" is only half of what a billing question asks.
   const parts: string[] = [];
   if (typeof value.fromPlan === "string" && typeof value.toPlan === "string" && value.fromPlan !== value.toPlan) {
-    parts.push(`方案 ${planLabel(value.fromPlan)} → ${planLabel(value.toPlan)}`);
+    // The labels were stored with the row, so a plan renamed or archived later
+    // does not rewrite what this entry says happened.
+    const from = typeof value.fromPlanLabel === "string" ? value.fromPlanLabel : value.fromPlan;
+    const to = typeof value.toPlanLabel === "string" ? value.toPlanLabel : value.toPlan;
+    parts.push(`方案 ${from} → ${to}`);
   }
+  if (typeof value.fromPriceCents === "number" && typeof value.toPriceCents === "number" && value.fromPriceCents !== value.toPriceCents) {
+    parts.push(`月費 ${(value.fromPriceCents / 100).toLocaleString()} → ${(value.toPriceCents / 100).toLocaleString()}`);
+  }
+  if (!parts.length && typeof value.label === "string") parts.push(value.label);
   if (typeof value.fromStatus === "string" && typeof value.toStatus === "string" && value.fromStatus !== value.toStatus) {
     parts.push(`狀態 ${statusDescriptor("subscription", value.fromStatus).label} → ${statusDescriptor("subscription", value.toStatus).label}`);
   }

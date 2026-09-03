@@ -67,6 +67,12 @@ export type OrganizationSeal = { contentType: "image/jpeg" | "image/png" | "imag
  */
 export type WorkspaceSubscriptionDocument = {
   currentPeriodEnd?: Date;
+  /**
+   * What this company was recorded as paying when its plan was last set.
+   * Absent means "never priced", which is not the same as priced at zero.
+   */
+  priceCents?: number;
+  priceCurrency?: string;
   /** Reserved for a payment provider's identifiers. Nothing reads these yet. */
   externalCustomerId?: string;
   externalSubscriptionId?: string;

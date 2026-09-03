@@ -88,12 +88,6 @@ export function status(domain: StatusDomain, value: string | undefined | null): 
 
 /* ---------------------------------------------------------------- vocabulary */
 
-export function planLabel(key: string | undefined | null) {
-  return planLabels[key as keyof typeof planLabels] ?? key ?? "—";
-}
-
-export const planLabels = { free: "免費", pro: "專業", starter: "標準" } as const;
-
 export const roleLabels = {
   admin: "管理者",
   operator: "操作員",
