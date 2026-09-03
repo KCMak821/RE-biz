@@ -23,6 +23,19 @@ const auditTargetLabels: Record<string, string> = {
   workspace_feature: "工作區功能",
 };
 
+const attentionReasonLabels: Record<string, string> = {
+  drift: "功能開關與方案不一致",
+  past_due: "款項逾期",
+  period_expired: "本期已到期",
+  period_upcoming: "本期即將到期",
+  trial_expired: "試用已到期",
+  trial_upcoming: "試用即將到期",
+};
+
+export function attentionReasonLabel(value: string) {
+  return attentionReasonLabels[value] ?? value;
+}
+
 export function auditActionLabel(value: string) {
   return auditActionLabels[value] ?? "平台設定變更";
 }

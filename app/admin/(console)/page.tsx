@@ -5,7 +5,7 @@ import { ButtonLink } from "@/components/app/button";
 import { EmptyState } from "@/components/app/empty-state";
 import { PageHeader } from "@/components/app/page-header";
 import { Card, Stat, Stats, SummaryList } from "@/components/app/surfaces";
-import { auditActionLabel, auditMetadataLabel, auditResultLabel, auditTargetLabel } from "@/components/admin/presentation";
+import { attentionReasonLabel, auditActionLabel, auditMetadataLabel, auditResultLabel, auditTargetLabel } from "@/components/admin/presentation";
 import { formatDateTime } from "@/lib/format";
 import { getPlatformOverview } from "@/lib/platform-admin";
 import { planLabel } from "@/lib/status";
@@ -48,6 +48,43 @@ export default async function AdminOverviewPage() {
           />
         ))}
       </Stats>
+
+      <Card
+        action={<Link className="btn btn-secondary btn-sm" href="/admin/workspaces">查看工作區</Link>}
+        description="到期日與方案落差都不會自動處理，需要人工判斷。這裡是待辦，不是警報。"
+        title="需要留意的公司"
+      >
+        {overview.attention.length ? (
+          <div className="admin-scroll">
+            <table className="dtable">
+              <thead>
+                <tr>
+                  <th>公司</th>
+                  <th>方案</th>
+                  <th>原因</th>
+                </tr>
+              </thead>
+              <tbody>
+                {overview.attention.map((row) => (
+                  <tr key={row.id}>
+                    <td>
+                      <Link className="dtable-row-link" href={`/admin/workspaces/${row.id}`}>
+                        {row.name}
+                      </Link>
+                    </td>
+                    <td>{planLabel(row.planKey)}</td>
+                    <td>{row.reasons.map(attentionReasonLabel).join("；")}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <EmptyState title="目前沒有需要處理的訂閱">
+            <p>試用即將到期、款項逾期，或功能開關與方案不一致的公司會出現在這裡。</p>
+          </EmptyState>
+        )}
+      </Card>
 
       <Card
         description="方案與訂閱狀態目前只是登記，不會阻擋任何人使用。定價確定前，先用這裡看真實分佈。"

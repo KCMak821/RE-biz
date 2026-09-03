@@ -53,6 +53,79 @@ export function AdminSearchForm({
   );
 }
 
+export function WorkspaceFilters({
+  action,
+  keyword,
+  planKey,
+  planOptions,
+  resultLabel,
+  statusOptions,
+  subscriptionStatus,
+}: {
+  action: string;
+  keyword: string;
+  planKey: string;
+  planOptions: Array<{ label: string; value: string }>;
+  resultLabel?: string;
+  statusOptions: Array<{ label: string; value: string }>;
+  subscriptionStatus: string;
+}) {
+  const filtered = Boolean(keyword || planKey || subscriptionStatus);
+  return (
+    <form action={action} className="toolbar no-print" method="get">
+      <div className="toolbar-search">
+        <label className="sr-only" htmlFor="workspace-search">
+          搜尋公司
+        </label>
+        <Search aria-hidden="true" size={15} />
+        <input
+          className="control"
+          defaultValue={keyword}
+          id="workspace-search"
+          name="q"
+          placeholder="公司名稱、擁有者、方案或 ID"
+          type="search"
+        />
+      </div>
+      <div className="toolbar-filters">
+        <div className="toolbar-select">
+          <label htmlFor="workspace-plan">方案</label>
+          <select className="control control-select" defaultValue={planKey} id="workspace-plan" name="plan">
+            <option value="">全部方案</option>
+            {planOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="toolbar-select">
+          <label htmlFor="workspace-subscription">訂閱狀態</label>
+          <select className="control control-select" defaultValue={subscriptionStatus} id="workspace-subscription" name="subscription">
+            <option value="">全部狀態</option>
+            {statusOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+      <div className="toolbar-meta">
+        {resultLabel ? <span className="toolbar-count">{resultLabel}</span> : null}
+        <button className="btn btn-secondary btn-sm" type="submit">
+          套用
+        </button>
+        {filtered ? (
+          <Link className="toolbar-reset" href={action}>
+            清除條件
+          </Link>
+        ) : null}
+      </div>
+    </form>
+  );
+}
+
 export function AuditLogFilters({
   action,
   from,

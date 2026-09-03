@@ -96,6 +96,51 @@ export function planFor(planKey: string | undefined | null): Plan {
   return isPlanKey(planKey) ? plans[planKey] : plans[defaultPlanKey];
 }
 
+/** How close a recorded date is to lapsing. Nothing acts on this; it is shown. */
+export type ExpiryState = "none" | "upcoming" | "expired";
+
+/** A date within this many days counts as "upcoming" rather than merely future. */
+export const expiryWarningDays = 14;
+
+export function expiryState(value: string | null | undefined, now: Date = new Date()): ExpiryState {
+  if (!value) return "none";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "none";
+  if (date.getTime() < now.getTime()) return "expired";
+  const days = (date.getTime() - now.getTime()) / (1000 * 60 * 60 * 24);
+  return days <= expiryWarningDays ? "upcoming" : "none";
+}
+
+/**
+ * Where a workspace's feature switches disagree with what its plan is meant to
+ * include.
+ *
+ * The two are deliberately independent — a plan records what is paid for, the
+ * switches decide what works — so drift is normal and often intentional (a
+ * goodwill gesture, a trial of one feature). It is worth showing rather than
+ * correcting: before allowances can be enforced, you want to know how far the
+ * plans on paper have drifted from what customers actually have.
+ */
+export type PlanDrift = {
+  /** Switched on although the plan does not include it. */
+  extra: WorkspaceFeatureKey[];
+  /** Included in the plan but switched off. */
+  missing: WorkspaceFeatureKey[];
+};
+
+export function planDrift(planKey: PlanKey, enabled: Record<WorkspaceFeatureKey, boolean>): PlanDrift {
+  const included = new Set<WorkspaceFeatureKey>(plans[planKey].features);
+  const keys = Object.keys(enabled) as WorkspaceFeatureKey[];
+  return {
+    extra: keys.filter((key) => enabled[key] && !included.has(key)),
+    missing: keys.filter((key) => !enabled[key] && included.has(key)),
+  };
+}
+
+export function hasDrift(drift: PlanDrift) {
+  return drift.extra.length > 0 || drift.missing.length > 0;
+}
+
 /**
  * How a month's usage sits against an allowance. `null` allowances never
  * report an overage, and a plan someone is over is a fact to surface, not an

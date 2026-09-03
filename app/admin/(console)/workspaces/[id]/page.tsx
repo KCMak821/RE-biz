@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 
 import { ListCard } from "@/components/app/data-table";
+import { Callout } from "@/components/app/feedback";
 import { EmptyState } from "@/components/app/empty-state";
 import { PageHeader } from "@/components/app/page-header";
 import { StatusBadge } from "@/components/app/status-badge";
@@ -10,7 +11,8 @@ import { WorkspaceControls } from "@/components/admin/workspace-controls";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { getAdminWorkspace } from "@/lib/platform-admin";
 import { planLabel, roleLabel } from "@/lib/status";
-import { allowanceState, plans } from "@/lib/subscription";
+import { allowanceState, hasDrift, plans } from "@/lib/subscription";
+import { featureLabel } from "@/lib/status";
 
 export default async function WorkspaceDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -58,6 +60,22 @@ export default async function WorkspaceDetailPage({ params }: { params: Promise<
               { label: "本期到期", value: workspace.subscription.currentPeriodEnd ? formatDate(workspace.subscription.currentPeriodEnd) : "尚未開始收費" },
             ]}
           />
+          {hasDrift(workspace.drift) ? (
+            <div style={{ marginTop: 14 }}>
+              <Callout title="功能開關與方案不一致" tone="warning">
+                <p>
+                  {workspace.drift.extra.length
+                    ? `方案未包含但已開放：${workspace.drift.extra.map(featureLabel).join("、")}。`
+                    : ""}
+                  {workspace.drift.missing.length
+                    ? `方案包含但已關閉：${workspace.drift.missing.map(featureLabel).join("、")}。`
+                    : ""}
+                  這不一定是錯的——刻意通融或單獨試用都會這樣。方案只是帳務登記，實際可用的功能仍由上方開關決定。
+                </p>
+              </Callout>
+            </div>
+          ) : null}
+
           <div style={{ marginTop: 14 }}>
             <h3 className="card-title" style={{ fontSize: 16, marginBottom: 10 }}>
               本月用量對照方案額度

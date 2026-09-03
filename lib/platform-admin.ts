@@ -2,8 +2,8 @@ import { ObjectId, type ClientSession, type Filter } from "mongodb";
 
 import { type AccountStatus, type OrganizationDocument, type UserDocument, type WorkspaceStatus, type WorkspaceSubscriptionDocument } from "@/lib/auth";
 import {
-  defaultPlanKey, isPlanKey, isSubscriptionStatus, planKeys, plans, subscriptionStatuses,
-  type PlanKey, type SubscriptionStatus, type WorkspaceSubscription,
+  defaultPlanKey, expiryState, hasDrift, isPlanKey, isSubscriptionStatus, planDrift, planKeys, plans, subscriptionStatuses,
+  type PlanDrift, type PlanKey, type SubscriptionStatus, type WorkspaceSubscription,
 } from "@/lib/subscription";
 import { getCurrentPlatformAdmin, type PlatformAdminActor, type PlatformAdminDocument } from "@/lib/platform-auth";
 import { getDatabase, getMongoClient } from "@/lib/mongodb";
@@ -12,7 +12,7 @@ import { escapedRegex, keywordRegex } from "@/lib/query";
 // Feature keys and the raw switch reader live in lib/workspace-features so that
 // lib/auth can put them on the session without importing this module.
 export { isWorkspaceFeatureEnabled, workspaceFeatureKeys, type WorkspaceFeatureKey } from "@/lib/workspace-features";
-import { isWorkspaceFeatureEnabled, workspaceFeatureKeys, type WorkspaceFeatureKey } from "@/lib/workspace-features";
+import { defaultWorkspaceFeatures, isWorkspaceFeatureEnabled, workspaceFeatureKeys, type WorkspaceFeatureKey, type WorkspaceFeatures } from "@/lib/workspace-features";
 export const platformAuditActions = [
   "WORKSPACE_SUSPENDED",
   "WORKSPACE_REACTIVATED",
@@ -73,6 +73,7 @@ export type AdminWorkspace = {
   id: string;
   name: string;
   owner: { email: string; name: string } | null;
+  drift: PlanDrift;
   status: WorkspaceStatus;
   subscription: WorkspaceSubscription;
   usage: WorkspaceUsage;
@@ -133,7 +134,7 @@ export async function getPlatformOverview() {
   await preparePlatformAdminCollections();
   const database = await getDatabase();
   const organizations = database.collection<OrganizationDocument>("organizations");
-  const [totalWorkspaces, suspendedWorkspaces, totalUsers, totalReceipts, totalAccountingRecords, totalQuotations, recentAuditLogs, subscriptions] = await Promise.all([
+  const [totalWorkspaces, suspendedWorkspaces, totalUsers, totalReceipts, totalAccountingRecords, totalQuotations, recentAuditLogs, subscriptions, attention] = await Promise.all([
     organizations.countDocuments(),
     organizations.countDocuments({ status: "suspended" }),
     database.collection<UserDocument>("users").countDocuments(),
@@ -142,13 +143,49 @@ export async function getPlatformOverview() {
     database.collection("quotes").countDocuments(),
     listPlatformAuditLogs({ limit: 6 }),
     planBreakdown(),
+    subscriptionAttention(),
   ]);
   return {
     // Workspaces predating the status field count as active, so the active
     // total is the remainder rather than a second status query.
     activeWorkspaces: totalWorkspaces - suspendedWorkspaces,
-    recentAuditLogs, subscriptions, suspendedWorkspaces, totalAccountingRecords, totalQuotations, totalReceipts, totalUsers, totalWorkspaces,
+    attention, recentAuditLogs, subscriptions, suspendedWorkspaces, totalAccountingRecords, totalQuotations, totalReceipts, totalUsers, totalWorkspaces,
   };
+}
+
+export type SubscriptionAttentionReason = "trial_expired" | "trial_upcoming" | "period_expired" | "period_upcoming" | "past_due" | "drift";
+
+export type SubscriptionAttentionRow = {
+  id: string;
+  name: string;
+  planKey: PlanKey;
+  reasons: SubscriptionAttentionReason[];
+};
+
+/**
+ * Companies whose subscription record needs a human to look at it.
+ *
+ * Nothing here happens automatically — no trial lapses into a suspension, no
+ * overdue account is cut off. Recording a date only helps if something surfaces
+ * it, so this is the list that turns those inert dates into work.
+ */
+export async function subscriptionAttention(): Promise<SubscriptionAttentionRow[]> {
+  const workspaces = await listAdminWorkspaces();
+  const now = new Date();
+  return workspaces.flatMap((workspace) => {
+    const reasons: SubscriptionAttentionReason[] = [];
+    const trial = expiryState(workspace.subscription.trialEndsAt, now);
+    if (trial === "expired") reasons.push("trial_expired");
+    else if (trial === "upcoming") reasons.push("trial_upcoming");
+    const period = expiryState(workspace.subscription.currentPeriodEnd, now);
+    if (period === "expired") reasons.push("period_expired");
+    else if (period === "upcoming") reasons.push("period_upcoming");
+    if (workspace.subscription.status === "past_due") reasons.push("past_due");
+    if (hasDrift(workspace.drift)) reasons.push("drift");
+    return reasons.length
+      ? [{ id: workspace.id, name: workspace.name, planKey: workspace.subscription.planKey, reasons }]
+      : [];
+  });
 }
 
 /**
@@ -244,6 +281,18 @@ export async function getWorkspaceUsage(organizationId: ObjectId): Promise<Works
   return (await usageByWorkspace([organizationId])).get(organizationId.toHexString()) ?? emptyUsage();
 }
 
+async function featuresByWorkspace(organizationIds: ObjectId[]): Promise<Map<string, WorkspaceFeatures>> {
+  const byWorkspace = new Map(organizationIds.map((id) => [id.toHexString(), defaultWorkspaceFeatures()]));
+  if (!organizationIds.length) return byWorkspace;
+  const rows = await (await getDatabase()).collection<WorkspaceFeatureDocument>("workspaceFeatures")
+    .find({ organizationId: { $in: organizationIds } }).toArray();
+  for (const row of rows) {
+    const features = byWorkspace.get(row.organizationId.toHexString());
+    if (features && workspaceFeatureKeys.includes(row.featureKey)) features[row.featureKey] = row.enabled;
+  }
+  return byWorkspace;
+}
+
 async function workspaceFeatureRows(organizationId: ObjectId) {
   const rows = await (await getDatabase()).collection<WorkspaceFeatureDocument>("workspaceFeatures").find({ organizationId }).toArray();
   const enabledByKey = new Map(rows.map((row) => [row.featureKey, row.enabled]));
@@ -255,7 +304,11 @@ export async function canUseWorkspaceFeature(user: { organization: { id: string;
   return isWorkspaceFeatureEnabled(new ObjectId(user.organization.id), featureKey);
 }
 
-export async function listAdminWorkspaces({ keyword = "" }: { keyword?: string } = {}): Promise<AdminWorkspace[]> {
+export async function listAdminWorkspaces({
+  keyword = "",
+  planKey,
+  subscriptionStatus,
+}: { keyword?: string; planKey?: string; subscriptionStatus?: string } = {}): Promise<AdminWorkspace[]> {
   await preparePlatformAdminCollections();
   const database = await getDatabase();
   const organizations = await database.collection<OrganizationDocument>("organizations").find({}).sort({ createdAt: -1 }).toArray();
@@ -266,28 +319,36 @@ export async function listAdminWorkspaces({ keyword = "" }: { keyword?: string }
   const userIds = memberships.map((membership) => membership.userId);
   const users = userIds.length ? await database.collection<UserDocument>("users").find({ _id: { $in: userIds } }, { projection: { email: 1, name: 1 } }).toArray() : [];
   const usersById = new Map(users.map((user) => [user._id.toHexString(), user]));
-  const usage = await usageByWorkspace(organizationIds);
+  const [usage, featureMap] = await Promise.all([
+    usageByWorkspace(organizationIds),
+    featuresByWorkspace(organizationIds),
+  ]);
   const rows = organizations.map((organization) => {
     const organizationMemberships = memberships.filter((membership) => membership.organizationId.equals(organization._id));
     const ownerMembership = organizationMemberships.find((membership) => membership.role === "owner");
     const owner = ownerMembership ? usersById.get(ownerMembership.userId.toHexString()) : undefined;
+    const subscription = toSubscription(organization.subscription, organization.createdAt);
     return {
       createdAt: organization.createdAt.toISOString(),
+      drift: planDrift(subscription.planKey, featureMap.get(organization._id.toHexString()) ?? defaultWorkspaceFeatures()),
       id: organization._id.toHexString(),
       name: organization.name,
       owner: owner ? { email: owner.email, name: owner.name } : null,
       status: workspaceStatus(organization.status),
-      subscription: toSubscription(organization.subscription, organization.createdAt),
+      subscription,
       usage: usage.get(organization._id.toHexString()) ?? emptyUsage(),
       userCount: organizationMemberships.filter((membership) => membership.status === "active").length,
     };
   });
+  const filtered = rows.filter((row) =>
+    (!isPlanKey(planKey) || row.subscription.planKey === planKey)
+    && (!isSubscriptionStatus(subscriptionStatus) || row.subscription.status === subscriptionStatus));
   const trimmed = keyword.trim();
-  if (!trimmed) return rows;
+  if (!trimmed) return filtered;
   // Support is usually handed the company name, the owner's email, or an id
   // from a bug report, so all four match the same box.
   const matches = keywordRegex(trimmed);
-  return rows.filter((row) => matches.test(row.name) || matches.test(row.id)
+  return filtered.filter((row) => matches.test(row.name) || matches.test(row.id)
     || matches.test(plans[row.subscription.planKey].label)
     || (row.owner ? matches.test(row.owner.name) || matches.test(row.owner.email) : false));
 }
@@ -313,8 +374,12 @@ export async function getAdminWorkspace(id: string): Promise<AdminWorkspaceDetai
   });
   const ownerMember = members.find((member) => member.role === "owner");
   const [usage, features] = await Promise.all([getWorkspaceUsage(organizationId), workspaceFeatureRows(organizationId)]);
+  const subscriptionForDrift = toSubscription(organization.subscription, organization.createdAt);
+  const enabledByKey = Object.fromEntries(features.map((row) => [row.featureKey, row.enabled])) as WorkspaceFeatures;
   return {
-    createdAt: organization.createdAt.toISOString(), features, id: organization._id.toHexString(), members, name: organization.name,
+    createdAt: organization.createdAt.toISOString(),
+    drift: planDrift(subscriptionForDrift.planKey, enabledByKey),
+    features, id: organization._id.toHexString(), members, name: organization.name,
     owner: ownerMember ? { email: ownerMember.email, name: ownerMember.name } : null,
     status: workspaceStatus(organization.status),
     subscription: toSubscription(organization.subscription, organization.createdAt),

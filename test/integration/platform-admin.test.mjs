@@ -927,6 +927,12 @@ test(
     assert.equal(planChange.metadata.fromPlan, "free");
     assert.equal(planChange.metadata.toPlan, "pro");
     assert.equal(planChange.actor.email, "platform-admin@rebiz.test");
+
+    await request(`/api/admin/workspaces/${fixture.workspaceAId}/subscription`, {
+      adminToken: fixture.adminToken,
+      body: { planKey: "free", status: "active", trialEndsAt: null },
+      method: "PATCH",
+    });
   },
 );
 
@@ -961,6 +967,116 @@ test(
     assert.equal(usage.receipts, 1);
     assert.equal(usage.thisMonth.receipts, 1);
     assert.equal(usage.thisMonth.quotations, 0);
+  },
+);
+
+test(
+  "the workspace list can be filtered by plan and by subscription status",
+  { concurrency: false },
+  async () => {
+    await request(`/api/admin/workspaces/${fixture.workspaceBId}/subscription`, {
+      adminToken: fixture.adminToken,
+      body: { planKey: "pro", status: "past_due" },
+      method: "PATCH",
+    });
+    try {
+      const byPlan = await request("/api/admin/workspaces?plan=pro", {
+        adminToken: fixture.adminToken,
+      });
+      assert.deepEqual(
+        byPlan.body.workspaces.map((workspace) => workspace.name),
+        ["Workspace B"],
+      );
+
+      const byStatus = await request("/api/admin/workspaces?subscription=past_due", {
+        adminToken: fixture.adminToken,
+      });
+      assert.deepEqual(
+        byStatus.body.workspaces.map((workspace) => workspace.name),
+        ["Workspace B"],
+      );
+
+      // An unknown filter value is ignored rather than returning nothing, so a
+      // stale bookmark does not look like "no companies exist".
+      const nonsense = await request("/api/admin/workspaces?plan=enterprise", {
+        adminToken: fixture.adminToken,
+      });
+      assert.equal(nonsense.body.workspaces.length >= 2, true);
+    } finally {
+      await request(`/api/admin/workspaces/${fixture.workspaceBId}/subscription`, {
+        adminToken: fixture.adminToken,
+        body: { planKey: "free", status: "active" },
+        method: "PATCH",
+      });
+    }
+  },
+);
+
+test(
+  "a plan whose features do not match the switches is reported as drift",
+  { concurrency: false },
+  async () => {
+    const features = database.collection("workspaceFeatures");
+    // "free" does not include quotations, so leaving it switched on is drift.
+    const clean = await request(`/api/admin/workspaces/${fixture.workspaceAId}`, {
+      adminToken: fixture.adminToken,
+    });
+    assert.deepEqual(clean.body.workspace.drift.extra.sort(), ["invoices", "quotations"]);
+    assert.deepEqual(clean.body.workspace.drift.missing, []);
+
+    await features.updateOne(
+      { featureKey: "receipts", organizationId: fixture.workspaceAId },
+      { $set: { enabled: false, updatedAt: new Date() }, $setOnInsert: { createdAt: new Date() } },
+      { upsert: true },
+    );
+    try {
+      const drifted = await request(`/api/admin/workspaces/${fixture.workspaceAId}`, {
+        adminToken: fixture.adminToken,
+      });
+      // Receipts are part of "free" but now switched off.
+      assert.deepEqual(drifted.body.workspace.drift.missing, ["receipts"]);
+    } finally {
+      await features.updateOne(
+        { featureKey: "receipts", organizationId: fixture.workspaceAId },
+        { $set: { enabled: true, updatedAt: new Date() } },
+      );
+    }
+  },
+);
+
+test(
+  "an expired trial is surfaced for a human rather than acted on",
+  { concurrency: false },
+  async () => {
+    await request(`/api/admin/workspaces/${fixture.workspaceAId}/subscription`, {
+      adminToken: fixture.adminToken,
+      body: { status: "trialing", trialEndsAt: "2020-01-01" },
+      method: "PATCH",
+    });
+    try {
+      const overview = await request("/api/admin/overview", {
+        adminToken: fixture.adminToken,
+      });
+      const row = overview.body.overview.attention.find(
+        (entry) => entry.id === fixture.workspaceAId.toHexString(),
+      );
+      assert.ok(row, "expected the workspace in the attention list");
+      assert.ok(row.reasons.includes("trial_expired"));
+
+      // Surfaced, not enforced: the workspace still works and is still active.
+      const stillWorks = await request("/api/receipts", { token: fixture.userAToken });
+      assert.equal(stillWorks.response.status, 200);
+      const workspace = await database
+        .collection("organizations")
+        .findOne({ _id: fixture.workspaceAId });
+      assert.notEqual(workspace.status, "suspended");
+    } finally {
+      await request(`/api/admin/workspaces/${fixture.workspaceAId}/subscription`, {
+        adminToken: fixture.adminToken,
+        body: { status: "active", trialEndsAt: null },
+        method: "PATCH",
+      });
+    }
   },
 );
 

@@ -1,25 +1,27 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 
-import { AdminSearchForm } from "@/components/admin/admin-filters";
+import { WorkspaceFilters } from "@/components/admin/admin-filters";
 import { EmptyState } from "@/components/app/empty-state";
 import { ListCard } from "@/components/app/data-table";
 import { PageHeader } from "@/components/app/page-header";
 import { StatusBadge } from "@/components/app/status-badge";
 import { formatDate } from "@/lib/format";
 import { listAdminWorkspaces } from "@/lib/platform-admin";
-import { planLabel } from "@/lib/status";
+import { planLabel, status as statusDescriptor } from "@/lib/status";
+import { hasDrift, planKeys, subscriptionStatuses } from "@/lib/subscription";
 
 export const metadata: Metadata = { title: "工作區｜RE-Biz 平台管理" };
 
 export default async function WorkspacesPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string }>;
+  searchParams: Promise<{ plan?: string; q?: string; subscription?: string }>;
 }) {
-  const { q } = await searchParams;
+  const { plan = "", q, subscription = "" } = await searchParams;
   const keyword = q?.trim() ?? "";
-  const workspaces = await listAdminWorkspaces({ keyword });
+  const workspaces = await listAdminWorkspaces({ keyword, planKey: plan, subscriptionStatus: subscription });
+  const filtered = Boolean(keyword || plan || subscription);
 
   return (
     <div className="page page-wide">
@@ -28,14 +30,19 @@ export default async function WorkspacesPage({
         description="每個公司的擁有者、成員數、使用量與狀態。進入詳情頁才能暫停公司或開關個別功能。"
         title="工作區"
       />
-      <AdminSearchForm
+      <WorkspaceFilters
         action="/admin/workspaces"
         keyword={keyword}
-        label="搜尋公司"
-        placeholder="公司名稱、擁有者、方案或 ID"
-        resultLabel={keyword ? `符合「${keyword}」的有 ${workspaces.length} 個` : undefined}
+        planKey={plan}
+        planOptions={planKeys.map((key) => ({ label: planLabel(key), value: key }))}
+        resultLabel={filtered ? `符合條件的有 ${workspaces.length} 間` : undefined}
+        statusOptions={subscriptionStatuses.map((key) => ({
+          label: statusDescriptor("subscription", key).label,
+          value: key,
+        }))}
+        subscriptionStatus={subscription}
       />
-      <ListCard footer={workspaces.length && !keyword ? `共 ${workspaces.length} 個公司。` : undefined}>
+      <ListCard footer={workspaces.length && !filtered ? `共 ${workspaces.length} 間公司。` : undefined}>
         {workspaces.length ? (
           <div className="admin-scroll">
             <table className="dtable">
@@ -73,7 +80,10 @@ export default async function WorkspacesPage({
                         "—"
                       )}
                     </td>
-                    <td>{planLabel(workspace.subscription.planKey)}</td>
+                    <td>
+                      {planLabel(workspace.subscription.planKey)}
+                      {hasDrift(workspace.drift) ? <small>功能與方案不一致</small> : null}
+                    </td>
                     <td>
                       <StatusBadge domain="subscription" value={workspace.subscription.status} />
                     </td>
@@ -95,9 +105,9 @@ export default async function WorkspacesPage({
               </tbody>
             </table>
           </div>
-        ) : keyword ? (
-          <EmptyState title={`沒有符合「${keyword}」的公司`}>
-            <p>試試只輸入公司名稱的一部分，或改用擁有者的電子郵件搜尋。</p>
+        ) : filtered ? (
+          <EmptyState title="沒有符合條件的公司">
+            <p>試試只輸入公司名稱的一部分，或把方案與訂閱狀態改回「全部」。</p>
           </EmptyState>
         ) : (
           <EmptyState title="還沒有任何公司">
