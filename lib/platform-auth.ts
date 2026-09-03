@@ -1,40 +1,38 @@
 import { createHash, randomBytes } from "node:crypto";
 
-import { compare, hash } from "bcryptjs";
 import { ObjectId } from "mongodb";
 import { cookies } from "next/headers";
 
 import { getDatabase } from "@/lib/mongodb";
 
 /**
- * Platform administrators, kept deliberately apart from customers.
+ * Platform administrators: the people who run RE-Biz, kept apart from the
+ * customers who use it.
  *
- * A platform admin used to be a row in `users` carrying `platformRole`, which
- * meant the person running RE-Biz was also one of its customers: they owned a
- * company (lib/auth's `ensureOrganization` gives every signing-in user one),
- * that company was counted in the platform's own statistics, and one session
- * cookie opened both the product and the back office.
+ * Who may administer the platform is decided by the `PLATFORM_ADMIN_EMAILS`
+ * environment variable, and identity is proven by signing in with Google. That
+ * combination is deliberate: there is no admin password to create, rotate or
+ * leak, and adding or removing an administrator is an edit in the hosting
+ * dashboard rather than a script run against the production database. Being
+ * locked out is recoverable the same way.
  *
- * These admins live in their own collection, belong to no company, never appear
- * in the customer-facing data, and authenticate through their own cookie. A
- * stolen product session cannot open the back office, and a stolen admin
- * session cannot touch a customer's records.
+ * The allowlist is re-read on every request, so removing an address takes
+ * effect immediately even for a session that is already open.
+ *
+ * The `platformAdmins` collection is a record, not an authority: it exists so
+ * sessions and audit-log rows have a stable id to point at. A row in it grants
+ * nothing on its own.
  */
 
 const ADMIN_SESSION_COOKIE = "rebiz_admin_session";
 /** Eight hours, not the product's thirty days: a back office should not stay open for a month. */
 const ADMIN_SESSION_DURATION_MS = 1000 * 60 * 60 * 8;
 
-export const platformAdminStatuses = ["active", "disabled"] as const;
-export type PlatformAdminStatus = typeof platformAdminStatuses[number];
-
 export type PlatformAdminDocument = {
   createdAt: Date;
   email: string;
   lastLoginAt?: Date;
   name: string;
-  passwordHash: string;
-  status: PlatformAdminStatus;
 };
 
 type PlatformAdminSessionDocument = { adminId: ObjectId; expiresAt: Date; tokenHash: string };
@@ -64,31 +62,42 @@ export async function preparePlatformAuthCollections() {
   ]);
 }
 
-export async function createPlatformAdmin(input: { email: string; name: string; password: string }) {
+/** The addresses allowed to administer the platform, lowercased. */
+export function platformAdminEmails(): string[] {
+  return (process.env.PLATFORM_ADMIN_EMAILS || "")
+    .split(",")
+    .map((email) => email.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+export function isAllowedPlatformAdmin(email: string | null | undefined) {
+  if (!email) return false;
+  return platformAdminEmails().includes(email.trim().toLowerCase());
+}
+
+/** Whether platform administration is switched on for this deployment at all. */
+export function platformAdminAccessConfigured() {
+  return platformAdminEmails().length > 0;
+}
+
+/**
+ * Records a successful Google sign-in and returns the actor.
+ *
+ * The caller must have checked the allowlist already; this only writes the
+ * record that sessions and audit rows refer to.
+ */
+export async function recordPlatformAdminSignIn(input: { email: string; name: string }): Promise<PlatformAdminActor> {
   await preparePlatformAuthCollections();
   const database = await getDatabase();
   const email = input.email.trim().toLowerCase();
-  try {
-    const result = await collections(database).admins.insertOne({
-      createdAt: new Date(), email, name: input.name.trim(),
-      passwordHash: await hash(input.password, 12), status: "active",
-    });
-    return { email, id: result.insertedId.toHexString(), name: input.name.trim() };
-  } catch (error) {
-    if (typeof error === "object" && error && "code" in error && error.code === 11000) throw new Error("ADMIN_EMAIL_TAKEN");
-    throw error;
-  }
-}
-
-export async function authenticatePlatformAdmin(email: string, password: string): Promise<PlatformAdminActor | null> {
-  await preparePlatformAuthCollections();
-  const database = await getDatabase();
-  const admin = await collections(database).admins.findOne({ email: email.trim().toLowerCase() });
-  // Compare regardless of whether the row exists so a missing account and a
-  // wrong password take the same time to answer.
-  const matches = await compare(password, admin?.passwordHash ?? "$2a$12$invalidinvalidinvalidinvalidinvalidinvalidinvalidinvalidin");
-  if (!admin || !matches || admin.status !== "active") return null;
-  await collections(database).admins.updateOne({ _id: admin._id }, { $set: { lastLoginAt: new Date() } });
+  const name = input.name.trim() || email;
+  await collections(database).admins.updateOne(
+    { email },
+    { $set: { lastLoginAt: new Date(), name }, $setOnInsert: { createdAt: new Date(), email } },
+    { upsert: true },
+  );
+  const admin = await collections(database).admins.findOne({ email });
+  if (!admin) throw new Error("PLATFORM_ADMIN_NOT_RECORDED");
   return { email: admin.email, id: admin._id.toHexString(), name: admin.name };
 }
 
@@ -108,9 +117,10 @@ export async function getCurrentPlatformAdmin(): Promise<PlatformAdminActor | nu
   const session = await sessions.findOne({ expiresAt: { $gt: new Date() }, tokenHash: tokenHash(token) });
   if (!session) return null;
   const admin = await admins.findOne({ _id: session.adminId });
-  // Disabling an admin takes effect immediately, without waiting for the
-  // session to expire.
-  if (!admin || admin.status !== "active") return null;
+  // The allowlist is the authority, and it is checked here rather than only at
+  // sign-in: taking an address out of the environment locks that person out on
+  // their very next request, without anyone touching the database.
+  if (!admin || !isAllowedPlatformAdmin(admin.email)) return null;
   return { email: admin.email, id: admin._id.toHexString(), name: admin.name };
 }
 
@@ -127,7 +137,6 @@ export function platformAdminSessionCookie(token: string, expiresAt: Date) {
     expires: expiresAt,
     httpOnly: true,
     maxAge: Math.floor(ADMIN_SESSION_DURATION_MS / 1000),
-    // Scoped to the back office: the product's own pages never receive it.
     path: "/",
     sameSite: "lax" as const,
     secure: process.env.NODE_ENV === "production",

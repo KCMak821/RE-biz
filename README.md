@@ -26,7 +26,7 @@
 - `npm run db:up`：啟動本機 MongoDB
 - `npm run db:down`：停止本機 MongoDB（保留資料）
 - `npm run db:migrate`：套用資料庫 migration
-- `npm run admin:create -- <email> "<名字>"`：建立平台管理者
+
 
 ## 平台管理後台（/admin）
 
@@ -85,17 +85,24 @@ STRIPE_WEBHOOK_SECRET=whsec_...
 簽章以原始 request body 驗證（HMAC-SHA256），超過 5 分鐘的時間戳視為重放並拒絕；
 重複投遞的同一個事件會被忽略。
 
-### 建立第一個平台管理者
+### 開通平台管理者
 
-全新的資料庫沒有任何管理者，所以 `/admin` 一開始對所有人關閉。這些指令碼會自己讀
-`.env.local`，不需要設定環境變數：
+後台用 **Google 登入**，沒有密碼。誰能進來由環境變數決定：
 
 ```
-npm run admin:create -- you@example.com "你的名字"
+PLATFORM_ADMIN_EMAILS=you@example.com,colleague@example.com
+GOOGLE_CLIENT_ID=...apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=...
 ```
 
-密碼在終端機輸入時不會顯示，也不會進入指令列或 shell history。建立後到
-`/admin/login` 登入。
+在 Google Cloud Console 建立 OAuth 用戶端，授權的重新導向 URI 填
+`<你的網址>/api/admin/auth/google/callback`。
+
+**加人、移除人都只是改這個環境變數**——不需要連正式資料庫、不需要跑任何指令碼。
+名單每個請求都會重新讀取，所以把某個 email 拿掉，那個人下一個請求就進不來了，
+即使他的 session 還沒過期。被鎖在外面時，同樣是改環境變數就能救回來。
+
+用 Google 登入只證明「你是誰」，**不會**讓任何人變成管理者；能不能進來完全由名單決定。
 
 ## 部署
 

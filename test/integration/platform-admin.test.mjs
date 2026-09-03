@@ -95,6 +95,8 @@ const planPayload = {
  * can be produced here without a Stripe account or any network access.
  */
 const stripeWebhookSecret = "whsec_test_secret_for_integration_tests";
+/** The one address PLATFORM_ADMIN_EMAILS grants access to in these tests. */
+const allowedAdminEmail = "platform-admin@rebiz.test";
 
 function stripeSignature(payload, timestampSeconds) {
   const signature = createHmac("sha256", stripeWebhookSecret)
@@ -201,6 +203,7 @@ async function createAdminSession(adminId) {
 async function seedFixtures() {
   const now = new Date();
   const platformAdminId = new ObjectId();
+  const removedAdminId = new ObjectId();
   const userAId = new ObjectId();
   const userBId = new ObjectId();
   const disabledUserId = new ObjectId();
@@ -209,14 +212,12 @@ async function seedFixtures() {
   const receiptBId = new ObjectId();
   // Platform administrators are their own collection. Nothing here makes an
   // administrator a customer, and no customer row can grant platform access.
-  await database.collection("platformAdmins").insertOne({
-    _id: platformAdminId,
-    createdAt: now,
-    email: "platform-admin@rebiz.test",
-    name: "Platform Admin",
-    passwordHash: "not-used-by-session-tests",
-    status: "active",
-  });
+  // Administrators are records, not credentials: access comes from the
+  // allowlist. The second row is deliberately absent from it.
+  await database.collection("platformAdmins").insertMany([
+    { _id: platformAdminId, createdAt: now, email: allowedAdminEmail, name: "Platform Admin" },
+    { _id: removedAdminId, createdAt: now, email: "removed-admin@rebiz.test", name: "Removed Admin" },
+  ]);
   await database.collection("users").insertMany([
     {
       _id: userAId,
@@ -334,6 +335,7 @@ async function seedFixtures() {
   return {
     adminToken: await createAdminSession(platformAdminId),
     platformAdminId,
+    removedAdminToken: await createAdminSession(removedAdminId),
     receiptBId,
     userAToken: await createSession(userAId),
     disabledUserId,
@@ -376,6 +378,7 @@ before(async () => {
         MONGODB_DB: databaseName,
         MONGODB_URI: mongoUri,
         NEXT_TELEMETRY_DISABLED: "1",
+        PLATFORM_ADMIN_EMAILS: allowedAdminEmail,
         STRIPE_WEBHOOK_SECRET: stripeWebhookSecret,
       },
       stdio: ["ignore", "pipe", "pipe"],
@@ -940,19 +943,63 @@ test(
 );
 
 test(
-  "the back office has its own login, and a customer password does not open it",
+  "the back office has its own door, and it is Google only",
   { concurrency: false },
   async () => {
-    const asCustomer = await request("/api/admin/auth/login", {
+    // The login page must stay reachable, or a locked-out admin has no way in.
+    const loginPage = await requestPage("/admin/login");
+    assert.equal(loginPage.status, 200);
+
+    // The password endpoint is gone, not merely hidden.
+    const passwordLogin = await request("/api/admin/auth/login", {
       body: { email: "user-a@example.test", password: "whatever-they-use" },
       method: "POST",
     });
-    assert.equal(asCustomer.response.status, 401);
+    assert.equal(passwordLogin.response.status, 404);
+  },
+);
 
-    // The login page itself must stay reachable, or a locked-out admin has no
-    // way back in.
-    const loginPage = await requestPage("/admin/login");
-    assert.equal(loginPage.status, 200);
+test(
+  "removing an address from the allowlist ends that administrator's access",
+  { concurrency: false },
+  async () => {
+    // Both sessions are real and unexpired; only the allowlist separates them.
+    const allowed = await request("/api/admin/overview", { adminToken: fixture.adminToken });
+    assert.equal(allowed.response.status, 200);
+
+    const removed = await request("/api/admin/overview", { adminToken: fixture.removedAdminToken });
+    assert.equal(removed.response.status, 403);
+
+    const page = await requestPage("/admin", { adminToken: fixture.removedAdminToken });
+    assert.equal(
+      new URL(page.headers.get("location"), baseUrl).pathname,
+      "/admin/login",
+    );
+  },
+);
+
+test(
+  "the Google sign-in hand-off is guarded on the way out and on the way back",
+  { concurrency: false },
+  async () => {
+    // Google is not configured for the test server, so starting the flow says
+    // so rather than sending anyone to a half-built redirect.
+    const start = await fetch(`${baseUrl}/api/admin/auth/google/start`, { redirect: "manual" });
+    assert.ok([302, 303, 307, 308].includes(start.status));
+    const startTarget = new URL(start.headers.get("location"), baseUrl);
+    assert.equal(startTarget.pathname, "/admin/login");
+    assert.equal(startTarget.searchParams.get("error"), "not_configured");
+
+    // A callback nobody started carries no matching state and signs in no one.
+    const forgedCallback = await fetch(
+      `${baseUrl}/api/admin/auth/google/callback?code=stolen&state=guessed`,
+      { redirect: "manual" },
+    );
+    const callbackTarget = new URL(forgedCallback.headers.get("location"), baseUrl);
+    assert.equal(callbackTarget.pathname, "/admin/login");
+    assert.ok(["bad_state", "not_configured"].includes(callbackTarget.searchParams.get("error")));
+    // Nothing was issued.
+    assert.equal((forgedCallback.headers.get("set-cookie") ?? "").includes("rebiz_admin_session="), false);
   },
 );
 
