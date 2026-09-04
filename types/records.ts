@@ -187,6 +187,22 @@ export type LedgerEntry = {
 
 export type LedgerSummary = { balance: number; expense: number; income: number };
 
+export type FinancialReport = {
+  expense: number;
+  income: number;
+  manualIncome: number;
+  netAmount: number;
+  receiptIncome: number;
+  transactionCount: number;
+};
+
+export type FinancialReportResponse = FinancialReport & {
+  entries: LedgerEntry[];
+  page: number;
+  total: number;
+  totalPages: number;
+};
+
 export type Member = {
   email: string;
   id: string;

@@ -118,12 +118,12 @@ export function LedgerView() {
             </Button>
           ) : null
         }
-        title="收支記帳"
+        title="收支紀錄"
       />
 
       {blocked ? (
         <ListCard>
-          <FeatureDisabled feature="收支記帳" message={blocked} />
+          <FeatureDisabled feature="收支紀錄" message={blocked} />
         </ListCard>
       ) : (
         <>

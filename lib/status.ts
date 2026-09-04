@@ -30,7 +30,7 @@ const invoice: Record<string, StatusDescriptor> = {
 
 const receipt: Record<string, StatusDescriptor> = {
   pending: { hint: "由報價單建立的草稿收據，確認收款後才會列入收入。", label: "待收款", tone: "warning" },
-  paid: { hint: "已確認收款，已列入收支記帳的收入。", label: "已收款", tone: "success" },
+  paid: { hint: "已確認收款，已列入收支紀錄。", label: "已收款", tone: "success" },
 };
 
 const customer: Record<string, StatusDescriptor> = {
@@ -107,7 +107,7 @@ export function roleLabel(role: string | undefined | null) {
 }
 
 export const featureLabels = {
-  accounting: "收支記帳",
+  accounting: "收支紀錄",
   invoices: "請款單",
   quotations: "報價單",
   receipts: "收據",

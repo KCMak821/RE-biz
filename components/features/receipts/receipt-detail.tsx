@@ -56,7 +56,7 @@ export function ReceiptDetail({ receiptId }: { receiptId: string }) {
     if (!receipt) return;
     const proceed = await confirm({
       confirmLabel: "確認已收款",
-      consequence: `確認後，${receipt.receiptNumber}（${currencyAmount(currency, receipt.amount)}）會列入「收支記帳」的收入，而且不能改回待收款。如果款項還沒實際入帳，請先保留現狀。`,
+      consequence: `確認後，${receipt.receiptNumber}（${currencyAmount(currency, receipt.amount)}）會列入「收支紀錄」，而且不能改回待收款。如果款項還沒實際入帳，請先保留現狀。`,
       title: `確認 ${receipt.payerName} 已付款？`,
     });
     if (!proceed) return;
@@ -67,7 +67,7 @@ export function ReceiptDetail({ receiptId }: { receiptId: string }) {
         body: JSON.stringify({ paymentStatus: "paid" }),
         method: "PUT",
       });
-      notify.success(`${receipt.receiptNumber} 已確認收款`, "這筆款項已列入收支記帳的收入。");
+      notify.success(`${receipt.receiptNumber} 已確認收款`, "這筆款項已列入收支紀錄。");
       load();
     } catch (failure) {
       notify.error("無法確認收款", failure instanceof Error ? failure.message : undefined);
@@ -182,10 +182,10 @@ export function ReceiptDetail({ receiptId }: { receiptId: string }) {
         {!canManageRecords
           ? "你的角色可以查看與下載這張收據，但不能確認收款。"
           : pending
-            ? "這張收據由報價單建立，還沒收到款項。實際入帳後按「確認已收款」，金額就會列入收支記帳的收入。"
+            ? "這張收據由報價單建立，還沒收到款項。實際入帳後按「確認已收款」，金額就會列入收支紀錄。"
             : receipt.sourceInvoiceNumber
-              ? `款項已收妥並列入收支記帳，來源請款單 ${receipt.sourceInvoiceNumber}。需要再給客戶一份時，按「下載 PDF」即可。`
-              : "款項已收妥並列入收支記帳。需要再給客戶一份時，按「下載 PDF」即可。"}
+              ? `款項已收妥並列入收支紀錄，來源請款單 ${receipt.sourceInvoiceNumber}。需要再給客戶一份時，按「下載 PDF」即可。`
+              : "款項已收妥並列入收支紀錄。需要再給客戶一份時，按「下載 PDF」即可。"}
       </NextStep>
 
       <div className="doc-frame print-keep">

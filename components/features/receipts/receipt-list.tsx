@@ -74,7 +74,7 @@ export function ReceiptList() {
   async function confirmPayment(receipt: SavedReceipt) {
     const proceed = await confirm({
       confirmLabel: "確認已收款",
-      consequence: `確認後，${receipt.receiptNumber}（${currencyAmount(currency, receipt.amount)}）會列入「收支記帳」的收入，而且不能改回待收款。如果款項還沒實際入帳，請先保留現狀。`,
+      consequence: `確認後，${receipt.receiptNumber}（${currencyAmount(currency, receipt.amount)}）會列入「收支紀錄」，而且不能改回待收款。如果款項還沒實際入帳，請先保留現狀。`,
       title: `確認 ${receipt.payerName} 已付款？`,
     });
     if (!proceed) return;
@@ -85,7 +85,7 @@ export function ReceiptList() {
         body: JSON.stringify({ paymentStatus: "paid" }),
         method: "PUT",
       });
-      notify.success(`${receipt.receiptNumber} 已確認收款`, "這筆款項已列入收支記帳的收入。");
+      notify.success(`${receipt.receiptNumber} 已確認收款`, "這筆款項已列入收支紀錄。");
       reload();
     } catch (error) {
       notify.error("無法確認收款", error instanceof Error ? error.message : undefined);
@@ -228,7 +228,7 @@ export function ReceiptList() {
                 icon={ReceiptText}
                 title="還沒有開立任何收據"
               >
-                <p>開立收據後，你可以在這裡重新下載 PDF、追蹤哪些款項還沒收到，收入也會自動進入收支記帳。</p>
+                <p>開立收據後，你可以在這裡重新下載 PDF、追蹤哪些款項還沒收到，收入也會自動列入收支紀錄。</p>
                 <p>{canManageRecords ? "第一次開立大約需要一分鐘。" : "目前沒有可查看的收據。"}</p>
               </EmptyState>
             )}

@@ -1,135 +1,128 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { ArrowDownRight, ArrowUpRight, ReceiptText } from "lucide-react";
+import { useEffect, useState, type FormEvent } from "react";
 
-import { Card, Stat, Stats } from "@/components/app/surfaces";
-import { Field, FormGrid } from "@/components/app/form";
+import { Button } from "@/components/app/button";
+import { DataTable, ListCard, type Column } from "@/components/app/data-table";
 import { FeatureDisabled } from "@/components/app/empty-state";
+import { Field, FormGrid } from "@/components/app/form";
+import { ListToolbar, ToolbarSelect } from "@/components/app/list-toolbar";
 import { PageHeader } from "@/components/app/page-header";
+import { Pagination } from "@/components/app/pagination";
 import { useWorkspace } from "@/components/app/session";
+import { Card, Stat, Stats, SummaryList } from "@/components/app/surfaces";
+import { Tag } from "@/components/app/status-badge";
 import { ApiError, request } from "@/lib/api";
 import { currencyAmount, formatDate, today } from "@/lib/format";
-import { help } from "@/lib/help-content";
-import type { LedgerSummary } from "@/types/records";
+import type { FinancialReportResponse, LedgerEntry } from "@/types/records";
 
-const TODAY = today();
-
-function monthRange(value: string) {
-  const [yearText, monthText] = value.split("-");
-  const year = Number(yearText);
-  const month = Number(monthText);
-  if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) return null;
-  const first = `${value}-01`;
-  const last = new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
-  return { from: first, to: last };
+function currentMonthStart() {
+  return `${today().slice(0, 7)}-01`;
 }
 
-const CURRENT_MONTH = TODAY.slice(0, 7);
-const INITIAL_RANGE = monthRange(CURRENT_MONTH) ?? { from: TODAY, to: TODAY };
+const emptyReport: FinancialReportResponse = {
+  entries: [], expense: 0, income: 0, manualIncome: 0, netAmount: 0, page: 1, receiptIncome: 0, total: 0, totalPages: 1, transactionCount: 0,
+};
 
 export function FinancialReportView() {
   const { currency } = useWorkspace();
-  const [from, setFrom] = useState(INITIAL_RANGE.from);
-  const [to, setTo] = useState(INITIAL_RANGE.to);
-  const [summary, setSummary] = useState<LedgerSummary>({ balance: 0, expense: 0, income: 0 });
+  const [startDate, setStartDate] = useState(currentMonthStart);
+  const [endDate, setEndDate] = useState(today);
+  const [appliedPeriod, setAppliedPeriod] = useState({ startDate: currentMonthStart(), endDate: today() });
+  const [type, setType] = useState("all");
+  const [page, setPage] = useState(1);
+  const [report, setReport] = useState<FinancialReportResponse>(emptyReport);
   const [loading, setLoading] = useState(true);
   const [blocked, setBlocked] = useState<string | null>(null);
-  const rangeIsValid = Boolean(from && to && from <= to);
-
-  const period = useMemo(() => {
-    if (!rangeIsValid) return "請選擇有效的開始及結束日期";
-    return `${formatDate(from)} 至 ${formatDate(to)}`;
-  }, [from, rangeIsValid, to]);
+  const [error, setError] = useState("");
 
   useEffect(() => {
-    if (!rangeIsValid) {
-      setLoading(false);
+    const params = new URLSearchParams({ ...appliedPeriod, page: String(page), type }).toString();
+    setLoading(true);
+    setError("");
+    void request<FinancialReportResponse>(`/api/reports/financial?${params}`)
+      .then((data) => { setReport(data); setBlocked(null); })
+      .catch((reason: unknown) => {
+        if (reason instanceof ApiError && reason.isForbidden) setBlocked(reason.message);
+        else setError(reason instanceof Error ? reason.message : "無法讀取財務報表。");
+      })
+      .finally(() => setLoading(false));
+  }, [appliedPeriod, page, type]);
+
+  function submit(event: FormEvent) {
+    event.preventDefault();
+    if (startDate && endDate && startDate > endDate) {
+      setError("開始日期不能晚於結束日期。");
       return;
     }
-    const timer = window.setTimeout(() => {
-      setLoading(true);
-      const params = new URLSearchParams({ from, to });
-      void request<{ summary?: LedgerSummary }>(`/api/ledger?${params}`)
-        .then((data) => {
-          setSummary(data.summary ?? { balance: 0, expense: 0, income: 0 });
-          setBlocked(null);
-        })
-        .catch((error: unknown) => {
-          if (error instanceof ApiError && error.isForbidden) setBlocked(error.message);
-        })
-        .finally(() => setLoading(false));
-    }, 0);
-    return () => window.clearTimeout(timer);
-  }, [from, rangeIsValid, to]);
-
-  function setMonth(value: string) {
-    const range = monthRange(value);
-    if (!range) return;
-    setFrom(range.from);
-    setTo(range.to);
+    setAppliedPeriod({ startDate, endDate });
+    setPage(1);
   }
+
+  const columns: Column<LedgerEntry>[] = [
+    {
+      card: "status", header: "收支", key: "type", width: "110px",
+      cell: (entry) => <Tag tone={entry.type === "IN" ? "success" : "danger"}>
+        {entry.type === "IN" ? <ArrowUpRight aria-hidden="true" size={13} style={{ marginRight: 4 }} /> : <ArrowDownRight aria-hidden="true" size={13} style={{ marginRight: 4 }} />}
+        {entry.type === "IN" ? "收入" : "支出"}
+      </Tag>,
+    },
+    {
+      card: "primary", header: "項目／說明", key: "description",
+      cell: (entry) => <><strong>{entry.description}</strong><small>{entry.source === "receipt" ? "已確認收款收據，自動認列" : "手動收支紀錄"}</small></>,
+    },
+    { card: "meta", cell: (entry) => formatDate(entry.date), header: "發生日期", key: "date", width: "140px" },
+    { card: "meta", header: "來源", key: "source", width: "140px", cell: (entry) => entry.source === "receipt" ? "收據" : "手動記帳" },
+    {
+      align: "end", card: "amount", header: "金額", key: "amount", width: "170px",
+      cell: (entry) => <strong style={{ color: entry.type === "IN" ? "var(--tone-success-fg)" : "var(--tone-danger-fg)" }}>
+        {entry.type === "IN" ? "+" : "−"}{currencyAmount(currency, entry.amount)}
+      </strong>,
+    },
+  ];
 
   return (
     <div className="page">
-      <PageHeader
-        description="預設以本月查看收入與支出；也可以選擇任何日期區間，立即重算該期間的淨額。"
-        how={help.reports}
-        title="財務報表"
-      />
-
-      {blocked ? (
-        <Card>
-          <FeatureDisabled feature="財務報表" message={blocked} />
-        </Card>
-      ) : (
-        <>
-          <Card description="選擇月份會自動帶入整月；你也可以直接調整開始及結束日期。" title="報表期間">
-            <FormGrid columns={3}>
-              <Field label="月份" onChange={(event) => setMonth(event.target.value)} type="month" value={from.slice(0, 7)} />
-              <Field label="開始日期" onChange={(event) => setFrom(event.target.value)} required type="date" value={from} />
-              <Field
-                error={from && to && from > to ? "結束日期不可早於開始日期。" : undefined}
-                label="結束日期"
-                onChange={(event) => setTo(event.target.value)}
-                required
-                type="date"
-                value={to}
-              />
+      <PageHeader description="按期間查看已認列的收入、支出與淨額。收入包括已確認收款的收據和手動收入；待收款收據不會提前列入。" title="財務報表" />
+      {blocked ? <Card><FeatureDisabled feature="財務報表" message={blocked} /></Card> : <>
+        <Card description="預設為本月；可調整日期後重新產生收支匯總。" title="報表期間">
+          <form className="form" onSubmit={submit}>
+            <FormGrid>
+              <Field label="開始日期" onChange={(event) => setStartDate(event.target.value)} type="date" value={startDate} />
+              <Field label="結束日期" onChange={(event) => setEndDate(event.target.value)} type="date" value={endDate} />
             </FormGrid>
-          </Card>
-
-          <div style={{ marginTop: 18 }}>
-            <Stats>
-              <Stat
-                hint="已確認收款的收據 ＋ 手動收入"
-                label="收入"
-                tone={summary.income ? "income" : undefined}
-                value={loading ? "—" : currencyAmount(currency, summary.income)}
-              />
-              <Stat
-                hint="此期間內記錄的所有支出"
-                label="支出"
-                tone={summary.expense ? "expense" : undefined}
-                value={loading ? "—" : currencyAmount(currency, summary.expense)}
-              />
-              <Stat hint="收入減支出" label="淨額" value={loading ? "—" : currencyAmount(currency, summary.balance)} />
-            </Stats>
-          </div>
-
-          <Card description="所有金額均只計入上方所選的日期區間。" title="收入與支出摘要">
-            <dl className="summary">
-              <div className="summary-item">
-                <dt>期間</dt>
-                <dd>{period}</dd>
-              </div>
-              <div className="summary-item">
-                <dt>計算方式</dt>
-                <dd>收入 − 支出 = 淨額</dd>
-              </div>
-            </dl>
-          </Card>
-        </>
-      )}
+            <div style={{ marginTop: 16 }}><Button pending={loading} pendingLabel="產生中…" type="submit" variant="primary">產生報表</Button></div>
+            {error ? <p className="form-error" role="alert">{error}</p> : null}
+          </form>
+        </Card>
+        <div style={{ marginTop: 18 }}><Stats>
+          <Stat hint="已確認收款收據＋手動收入" label="收入" tone="income" value={loading ? "—" : currencyAmount(currency, report.income)} />
+          <Stat hint="此期間的手動支出紀錄" label="支出" tone="expense" value={loading ? "—" : currencyAmount(currency, report.expense)} />
+          <Stat hint="收入減支出" label="淨額" value={loading ? "—" : currencyAmount(currency, report.netAmount)} />
+        </Stats></div>
+        <div style={{ marginTop: 18 }}><Card description="本表逐項列出此期間全部已認列的進出項，收入和支出均可回溯核對。" title="認列摘要">
+          <SummaryList items={[
+            { label: "收據收入", value: loading ? "—" : currencyAmount(currency, report.receiptIncome) },
+            { label: "手動收入", value: loading ? "—" : currencyAmount(currency, report.manualIncome) },
+            { label: "手動支出", value: loading ? "—" : currencyAmount(currency, report.expense) },
+            { label: "納入的紀錄數", value: loading ? "—" : `${report.transactionCount} 筆` },
+          ]} />
+        </Card></div>
+        <div style={{ marginTop: 18 }}>
+          <ListToolbar
+            filters={<ToolbarSelect label="顯示項目" onChange={(value) => { setType(value); setPage(1); }} options={[
+              { label: "全部進出項", value: "all" }, { label: "只看收入", value: "IN" }, { label: "只看支出", value: "OUT" },
+            ]} value={type} />}
+            resultLabel={loading ? "載入中…" : `顯示 ${report.entries.length} 筆，共 ${report.total} 筆`}
+          />
+          <ListCard footer="收據收入只包括已確認收款的收據；待收款收據不會出現在本報表。">
+            {report.entries.length ? <DataTable ariaLabel="財務報表交易明細" columns={columns} rowKey={(entry) => entry.id} rows={report.entries} /> :
+              <div style={{ padding: 24, textAlign: "center" }}><ReceiptText aria-hidden="true" size={28} /><p>這個期間沒有符合條件的收支紀錄。</p></div>}
+          </ListCard>
+          <Pagination disabled={loading} onPageChange={setPage} page={report.page} totalPages={report.totalPages} />
+        </div>
+      </>}
     </div>
   );
 }

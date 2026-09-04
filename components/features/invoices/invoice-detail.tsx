@@ -97,7 +97,7 @@ export function InvoiceDetail({ invoiceId }: { invoiceId: string }) {
     if (!invoice) return;
     const proceed = await confirm({
       confirmLabel: "開立收據",
-      consequence: `會依這張請款單開立一張已收款的收據，金額 ${currencyAmount(currency, invoice.totalAmount)}，並列入「收支記帳」的收入。每張請款單只能開立一次。`,
+      consequence: `會依這張請款單開立一張已收款的收據，金額 ${currencyAmount(currency, invoice.totalAmount)}，並列入「收支紀錄」。每張請款單只能開立一次。`,
       title: `要為 ${invoice.invoiceNumber} 開立收據嗎？`,
     });
     if (!proceed) return;
@@ -108,7 +108,7 @@ export function InvoiceDetail({ invoiceId }: { invoiceId: string }) {
         `/api/invoices/${invoice.id}/receipt`,
         { method: "POST" },
       );
-      notify.success(`已開立收據 ${data.receipt.receiptNumber}`, "這筆款項已列入收支記帳的收入。");
+      notify.success(`已開立收據 ${data.receipt.receiptNumber}`, "這筆款項已列入收支紀錄。");
       load();
     } catch (failure) {
       notify.error("無法開立收據", failure instanceof Error ? failure.message : undefined);
@@ -331,7 +331,7 @@ function describeNextStep(invoice: Invoice, canManage: boolean, remaining: numbe
     case "paid":
       return receipted
         ? "款項已全數收到，收據也已開立並列入收入。"
-        : "款項已全數收到。按「開立收據」產生收據，這筆金額就會列入收支記帳的收入。";
+        : "款項已全數收到。按「開立收據」產生收據，這筆金額就會列入收支紀錄。";
     case "void":
       return "這張請款單已作廢，只保留紀錄。需要重新請款請建立一張新的。";
     default:

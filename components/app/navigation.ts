@@ -61,7 +61,7 @@ export const navigation: NavGroup[] = [
         feature: "accounting",
         href: "/ledger",
         icon: BookOpenText,
-        label: "收支記帳",
+        label: "收支紀錄",
       },
       {
         description: "依月份或自訂日期區間查看收入、支出與淨額。",

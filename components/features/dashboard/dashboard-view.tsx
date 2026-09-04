@@ -114,7 +114,7 @@ export function DashboardView() {
   const failures = (
     [
       ["收據", data.receipts],
-      ["收支記帳", data.ledger],
+      ["收支紀錄", data.ledger],
       ["報價單", data.quotes],
       ["請款單", data.invoices],
     ] as const
