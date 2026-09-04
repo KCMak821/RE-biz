@@ -25,6 +25,30 @@ type LedgerRow = {
 };
 
 const ledgerTypes = ["all", "IN", "OUT"] as const;
+const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+
+function isCalendarDate(value: string) {
+  return datePattern.test(value) && new Date(`${value}T00:00:00.000Z`).toISOString().slice(0, 10) === value;
+}
+
+/** Reads an optional inclusive date range shared by the ledger and reports. */
+function readDateRange(searchParams: URLSearchParams) {
+  const from = searchParams.get("from")?.trim() ?? "";
+  const to = searchParams.get("to")?.trim() ?? "";
+  if ((from && !isCalendarDate(from)) || (to && !isCalendarDate(to))) return null;
+  if (from && to && from > to) return null;
+  return { from, to };
+}
+
+function dateMatch(field: string, range: { from: string; to: string }) {
+  if (!range.from && !range.to) return {};
+  return {
+    [field]: {
+      ...(range.from ? { $gte: range.from } : {}),
+      ...(range.to ? { $lte: range.to } : {}),
+    },
+  };
+}
 
 async function ledgerCollection() {
   const collection = (await getDatabase()).collection<LedgerEntryDocument>("ledgerEntries");
@@ -45,6 +69,8 @@ export async function GET(request: Request) {
     }
     const keyword = readKeyword(searchParams);
     const { page: requestedPage, pageSize } = readPageParams(searchParams);
+    const range = readDateRange(searchParams);
+    if (!range) return Response.json({ message: "日期區間不正確。" }, { status: 400 });
 
     const organizationId = new ObjectId(user.organization.id);
     const database = await getDatabase();
@@ -54,14 +80,14 @@ export async function GET(request: Request) {
        The totals always cover every record, never just the current page. */
     const [totals, receiptTotal] = await Promise.all([
       collection.aggregate<{ _id: "IN" | "OUT"; total: number }>([
-        { $match: { organizationId } },
+        { $match: { organizationId, ...dateMatch("date", range) } },
         { $group: { _id: "$type", total: { $sum: "$amount" } } },
       ]).toArray(),
       database.collection("receipts").aggregate<{ total: number }>([
         // Older ordinary receipts had no paymentStatus and remain paid for
         // backwards compatibility. Quote-created drafts are explicitly
         // pending, so they never become income until confirmation.
-        { $match: { organizationId, paymentStatus: { $ne: "pending" } } },
+        { $match: { organizationId, paymentStatus: { $ne: "pending" }, ...dateMatch("issueDate", range) } },
         { $group: { _id: null, total: { $sum: "$amount" } } },
       ]).toArray(),
     ]);
@@ -74,11 +100,15 @@ export async function GET(request: Request) {
        page is cut across a union of both rather than in application memory. */
     // Income, expense and balance are the whole company's, so every member of
     // an organization reads identical totals.
-    const manualMatch: Record<string, unknown> = { organizationId };
+    const manualMatch: Record<string, unknown> = { organizationId, ...dateMatch("date", range) };
     if (type !== "all") manualMatch.type = type;
     if (keyword) manualMatch.description = keywordRegex(keyword);
 
-    const receiptMatch: Record<string, unknown> = { organizationId, paymentStatus: { $ne: "pending" } };
+    const receiptMatch: Record<string, unknown> = {
+      organizationId,
+      paymentStatus: { $ne: "pending" },
+      ...dateMatch("issueDate", range),
+    };
     if (keyword) {
       const expression = keywordRegex(keyword);
       receiptMatch.$or = [{ receiptNumber: expression }, { payerName: expression }];

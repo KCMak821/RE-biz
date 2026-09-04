@@ -853,6 +853,15 @@ test("manual income and expense still work alongside the document flow", { concu
   assert.equal(summary.expense, opening.expense + 400);
   assert.equal(summary.balance, summary.income - summary.expense);
 
+  // The financial report uses the same ledger endpoint with an inclusive date
+  // range, so it must include only the month selected by the user.
+  const september = await request("/api/ledger?from=2026-09-01&to=2026-09-30", { token: fixture.owner });
+  assert.equal(september.response.status, 200);
+  assert.equal(september.body.summary.income, 250);
+  assert.equal(september.body.summary.expense, 400);
+  assert.deepEqual(september.body.summary, { balance: -150, expense: 400, income: 250 });
+  assert.equal((await request("/api/ledger?from=2026-09-31", { token: fixture.owner })).response.status, 400);
+
   // Every member of the workspace reads the same company totals.
   assert.deepEqual((await request("/api/ledger", { token: fixture.operator })).body.summary, summary);
   assert.deepEqual((await request("/api/ledger", { token: fixture.viewer })).body.summary, summary);
