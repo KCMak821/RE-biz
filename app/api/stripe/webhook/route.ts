@@ -1,5 +1,5 @@
-import { applyStripeSubscription } from "@/lib/platform-admin";
-import { readStripeEvent, verifyStripeSignature } from "@/lib/stripe-webhook";
+import { applyStripeSubscription, recordIgnoredStripeEvent } from "@/lib/platform-admin";
+import { readStripeEnvelope, readStripeEvent, verifyStripeSignature } from "@/lib/stripe-webhook";
 
 export const runtime = "nodejs";
 /** The raw body is what Stripe signed, so it must not be cached or rewritten. */
@@ -43,7 +43,13 @@ export async function POST(request: Request) {
   }
 
   const update = readStripeEvent(event);
-  if (!update) return Response.json({ ignored: true });
+  if (!update) {
+    // Verified, but nothing here acts on it. Noting it is what lets the billing
+    // page say "Stripe is reaching us" during setup.
+    const envelope = readStripeEnvelope(event);
+    if (envelope) await recordIgnoredStripeEvent(envelope).catch(() => {});
+    return Response.json({ ignored: true });
+  }
 
   try {
     const outcome = await applyStripeSubscription(update);

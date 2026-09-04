@@ -1,8 +1,8 @@
 import { ObjectId, type ClientSession, type Filter } from "mongodb";
 
 import { type AccountStatus, type OrganizationDocument, type UserDocument, type WorkspaceStatus, type WorkspaceSubscriptionDocument } from "@/lib/auth";
-import { isValidPlanKey, plansByKey, plansCollection, resolvePlan, type Plan, type PlanAllowances } from "@/lib/plans";
-import { type StripeSubscriptionUpdate } from "@/lib/stripe-webhook";
+import { isValidPlanKey, listPlans, plansByKey, plansCollection, resolvePlan, type Plan, type PlanAllowances } from "@/lib/plans";
+import { type StripeEventEnvelope, type StripeSubscriptionUpdate } from "@/lib/stripe-webhook";
 import {
   expiryState, hasDrift, isSubscriptionStatus, planDrift, subscriptionStatuses,
   type PlanDrift, type PlanKey, type SubscriptionStatus, type WorkspaceSubscription,
@@ -769,9 +769,85 @@ export async function setPlanArchived(actor: Pick<PlatformAdminActor, "id">, key
   );
 }
 
-export type StripeSyncOutcome = "applied" | "duplicate" | "no_match";
+export type StripeSyncOutcome = "applied" | "duplicate" | "no_match" | "ignored";
 
-type StripeEventDocument = { _id: string; receivedAt: Date };
+type StripeEventDocument = {
+  _id: string;
+  customerId?: string;
+  outcome: StripeSyncOutcome;
+  receivedAt: Date;
+  type: string;
+};
+
+export type StripeEventRow = {
+  customerId: string | null;
+  id: string;
+  outcome: StripeSyncOutcome;
+  receivedAt: string;
+  type: string;
+};
+
+async function stripeEventsCollection() {
+  const database = await getDatabase();
+  const events = database.collection<StripeEventDocument>("stripeEvents");
+  await events.createIndex({ receivedAt: -1 });
+  await events.createIndex({ receivedAt: 1 }, { expireAfterSeconds: 60 * 60 * 24 * 30 });
+  return events;
+}
+
+/**
+ * Notes a verified event this platform does not act on. Recorded so the back
+ * office can show that Stripe is reaching the endpoint even when nothing here
+ * changes as a result.
+ */
+export async function recordIgnoredStripeEvent(envelope: StripeEventEnvelope) {
+  const events = await stripeEventsCollection();
+  await events.updateOne(
+    { _id: envelope.id },
+    { $setOnInsert: { outcome: "ignored" as const, receivedAt: new Date(), type: envelope.type } },
+    { upsert: true },
+  );
+}
+
+/** The most recent verified events, for the billing setup page. */
+export async function listStripeEvents(limit = 20): Promise<StripeEventRow[]> {
+  const events = await stripeEventsCollection();
+  const rows = await events.find({}).sort({ receivedAt: -1 }).limit(limit).toArray();
+  return rows.map((row) => ({
+    customerId: row.customerId ?? null,
+    id: row._id,
+    outcome: row.outcome ?? "applied",
+    receivedAt: row.receivedAt.toISOString(),
+    type: row.type ?? "unknown",
+  }));
+}
+
+/**
+ * What is and is not wired up for billing.
+ *
+ * Deliberately reports only whether the signing secret exists, never its value:
+ * the page has to answer "is this configured" without becoming a way to read
+ * the secret back out.
+ */
+export async function stripeIntegrationStatus() {
+  const database = await getDatabase();
+  const [plans, linkedWorkspaces, totalWorkspaces, lastEvent] = await Promise.all([
+    listPlans(),
+    database.collection<OrganizationDocument>("organizations")
+      .countDocuments({ "subscription.externalCustomerId": { $exists: true, $ne: "" } }),
+    database.collection<OrganizationDocument>("organizations").countDocuments(),
+    (await stripeEventsCollection()).find({}).sort({ receivedAt: -1 }).limit(1).next(),
+  ]);
+  const active = plans.filter((plan) => !plan.archived);
+  return {
+    lastEventAt: lastEvent?.receivedAt.toISOString() ?? null,
+    linkedWorkspaces,
+    plansMapped: active.filter((plan) => plan.stripePriceId).length,
+    plansUnmapped: active.filter((plan) => !plan.stripePriceId).map((plan) => plan.label),
+    totalWorkspaces,
+    webhookSecretConfigured: Boolean(process.env.STRIPE_WEBHOOK_SECRET),
+  };
+}
 
 /**
  * Records what Stripe says about a company's subscription.
@@ -788,12 +864,17 @@ type StripeEventDocument = { _id: string; receivedAt: Date };
 export async function applyStripeSubscription(update: StripeSubscriptionUpdate): Promise<StripeSyncOutcome> {
   await preparePlatformAdminCollections();
   const database = await getDatabase();
-  const events = database.collection<StripeEventDocument>("stripeEvents");
-  await events.createIndex({ receivedAt: 1 }, { expireAfterSeconds: 60 * 60 * 24 * 30 });
+  const events = await stripeEventsCollection();
 
   // Stripe retries until it gets a 2xx, so the same event can arrive twice.
   try {
-    await events.insertOne({ _id: update.eventId, receivedAt: new Date() });
+    await events.insertOne({
+      _id: update.eventId,
+      customerId: update.customerId,
+      outcome: "applied",
+      receivedAt: new Date(),
+      type: update.type,
+    });
   } catch (error) {
     if (typeof error === "object" && error && "code" in error && error.code === 11000) return "duplicate";
     throw error;
@@ -801,7 +882,10 @@ export async function applyStripeSubscription(update: StripeSubscriptionUpdate):
 
   const organizations = database.collection<OrganizationDocument>("organizations");
   const organization = await organizations.findOne({ "subscription.externalCustomerId": update.customerId });
-  if (!organization) return "no_match";
+  if (!organization) {
+    await events.updateOne({ _id: update.eventId }, { $set: { outcome: "no_match" } });
+    return "no_match";
+  }
 
   const plans = await plansByKey();
   const current = toSubscription(organization.subscription, organization.createdAt, plans);

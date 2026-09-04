@@ -102,7 +102,23 @@ export type StripeSubscriptionUpdate = {
   priceId: string | null;
   status: SubscriptionStatus | null;
   subscriptionId: string | null;
+  type: string;
 };
+
+/**
+ * The identity of any verified event, including the ones nothing acts on.
+ *
+ * Recorded so the back office can tell "Stripe is not reaching us" apart from
+ * "Stripe is reaching us and sending events we do not act on" — during setup
+ * those look identical from the outside and have completely different fixes.
+ */
+export type StripeEventEnvelope = { id: string; type: string };
+
+export function readStripeEnvelope(event: unknown): StripeEventEnvelope | null {
+  if (typeof event !== "object" || !event) return null;
+  const { id, type } = event as { id?: unknown; type?: unknown };
+  return typeof id === "string" && id && typeof type === "string" && type ? { id, type } : null;
+}
 
 type StripeEvent = {
   data?: { object?: Record<string, unknown> };
@@ -146,6 +162,7 @@ export function readStripeEvent(event: unknown): StripeSubscriptionUpdate | null
         ? "canceled"
         : toSubscriptionStatus(asString(object.status) ?? undefined),
       subscriptionId: asString(object.id),
+      type,
     };
   }
 
@@ -159,6 +176,7 @@ export function readStripeEvent(event: unknown): StripeSubscriptionUpdate | null
       priceId: null,
       status: type === "invoice.payment_failed" ? "past_due" : "active",
       subscriptionId: asString(object.subscription),
+      type,
     };
   }
 

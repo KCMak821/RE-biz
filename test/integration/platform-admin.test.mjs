@@ -605,6 +605,8 @@ const adminPagePaths = [
   "/admin/workspaces",
   "/admin/users",
   "/admin/usage",
+  "/admin/plans",
+  "/admin/billing",
   "/admin/audit-logs",
 ];
 
@@ -1472,6 +1474,42 @@ test(
     });
     assert.equal(result.response.status, 200);
     assert.equal(result.body.ignored, true);
+  },
+);
+
+test(
+  "an event Stripe sends but nothing acts on is still recorded as received",
+  { concurrency: false },
+  async () => {
+    const ignored = await postStripeEvent({
+      data: { object: { id: "cs_billing_page" } },
+      id: "evt_ignored_but_seen",
+      type: "checkout.session.completed",
+    });
+    assert.equal(ignored.body.ignored, true);
+
+    // Setup depends on telling "Stripe never reached us" apart from "Stripe
+    // reached us and we had nothing to do with it".
+    const seen = await database
+      .collection("stripeEvents")
+      .findOne({ _id: "evt_ignored_but_seen" });
+    assert.ok(seen, "expected the ignored event to be recorded");
+    assert.equal(seen.outcome, "ignored");
+    assert.equal(seen.type, "checkout.session.completed");
+  },
+);
+
+test(
+  "the billing page reports what is wired up without revealing the secret",
+  { concurrency: false },
+  async () => {
+    const page = await requestPage("/admin/billing", { adminToken: fixture.adminToken });
+    assert.equal(page.status, 200);
+    const html = await page.text();
+
+    // It must say the secret is configured, and never contain it.
+    assert.equal(html.includes(stripeWebhookSecret), false);
+    assert.ok(html.includes("已設定"));
   },
 );
 
