@@ -62,6 +62,7 @@ export function auditMetadataLabel(metadata: unknown) {
   const value = metadata as {
     enabled?: unknown;
     featureKey?: unknown;
+    featuresApplied?: unknown;
     fromPlan?: unknown;
     fromPlanLabel?: unknown;
     fromPriceCents?: unknown;
@@ -91,6 +92,12 @@ export function auditMetadataLabel(metadata: unknown) {
   if (!parts.length && typeof value.label === "string") parts.push(value.label);
   if (typeof value.fromStatus === "string" && typeof value.toStatus === "string" && value.fromStatus !== value.toStatus) {
     parts.push(`狀態 ${statusDescriptor("subscription", value.fromStatus).label} → ${statusDescriptor("subscription", value.toStatus).label}`);
+  }
+  // A plan change now rewrites the feature switches, so the row has to say what
+  // the company was left with — that is the part a support question turns on.
+  if (typeof value.featuresApplied === "string") {
+    const granted = value.featuresApplied.split(",").filter(Boolean).map(featureLabel);
+    parts.push(`功能重設為 ${granted.length ? granted.join("、") : "全部關閉"}`);
   }
   return parts.length ? parts.join("；") : "—";
 }

@@ -14,7 +14,7 @@ import { escapedRegex, keywordRegex } from "@/lib/query";
 // Feature keys and the raw switch reader live in lib/workspace-features so that
 // lib/auth can put them on the session without importing this module.
 export { isWorkspaceFeatureEnabled, workspaceFeatureKeys, type WorkspaceFeatureKey } from "@/lib/workspace-features";
-import { defaultWorkspaceFeatures, isWorkspaceFeatureEnabled, workspaceFeatureKeys, type WorkspaceFeatureKey, type WorkspaceFeatures } from "@/lib/workspace-features";
+import { applyPlanFeatures, defaultWorkspaceFeatures, isWorkspaceFeatureEnabled, workspaceFeatureKeys, type WorkspaceFeatureKey, type WorkspaceFeatures } from "@/lib/workspace-features";
 export const platformAuditActions = [
   "WORKSPACE_SUSPENDED",
   "WORKSPACE_REACTIVATED",
@@ -572,10 +572,14 @@ function parseDateInput(value: string | null | undefined) {
 }
 
 /**
- * Records what a company is subscribed to. Changing a plan grants or removes
- * nothing on its own — feature switches and workspace status stay the only
- * things that gate access — so this is bookkeeping that the platform admin can
- * see and the audit log remembers.
+ * Records what a company is subscribed to, and — when the plan itself changes —
+ * resets its feature switches to what the new plan includes.
+ *
+ * The switches remain the only thing that gates access; moving a plan now
+ * rewrites them rather than leaving them where the previous plan left them,
+ * because a switch nobody flipped reads as "on" and would have let a downgraded
+ * company keep everything. Editing dates, status or Stripe ids touches no
+ * switch: only a genuine change of plan does.
  */
 export async function updateWorkspaceSubscription(
   actor: Pick<PlatformAdminActor, "id">,
@@ -633,7 +637,8 @@ export async function updateWorkspaceSubscription(
 
   // One action per kind of change, so the audit log reads as what happened
   // rather than as an opaque "subscription updated".
-  const action: PlatformAuditAction = nextPlan.key !== current.planKey
+  const planChanged = nextPlan.key !== current.planKey;
+  const action: PlatformAuditAction = planChanged
     ? "SUBSCRIPTION_PLAN_CHANGED"
     : change.status && change.status !== current.status
       ? "SUBSCRIPTION_STATUS_CHANGED"
@@ -647,12 +652,19 @@ export async function updateWorkspaceSubscription(
       metadata: {
         fromPlan: current.planKey, fromPlanLabel: currentPlan.label, fromStatus: current.status,
         toPlan: next.planKey, toPlanLabel: nextPlan.label, toStatus: next.status,
+        // What the company can actually do afterwards, which is the half of a
+        // plan change that a billing question is usually really asking about.
+        ...(planChanged ? { featuresApplied: nextPlan.features.join(",") } : {}),
       },
       targetId: workspaceId, targetType: "workspace",
     },
-    async (session) => (await organizations.updateOne(
-      { _id: organizationId }, { $set: { subscription: next } }, { session },
-    )).matchedCount > 0,
+    async (session) => {
+      const applied = (await organizations.updateOne(
+        { _id: organizationId }, { $set: { subscription: next } }, { session },
+      )).matchedCount > 0;
+      if (applied && planChanged) await applyPlanFeatures(organizationId, nextPlan.features, session);
+      return applied;
+    },
   );
 }
 
@@ -900,12 +912,17 @@ export async function applyStripeSubscription(update: StripeSubscriptionUpdate):
   if (update.currentPeriodEnd) next.currentPeriodEnd = new Date(update.currentPeriodEnd);
   // Moving onto a plan through Stripe records that plan's price, the same as
   // assigning it by hand would.
-  if (mappedPlan && mappedPlan.key !== current.planKey) {
-    next.priceCents = mappedPlan.priceCents;
-    next.priceCurrency = mappedPlan.currency;
+  const movedTo = mappedPlan && mappedPlan.key !== current.planKey ? mappedPlan : null;
+  if (movedTo) {
+    next.priceCents = movedTo.priceCents;
+    next.priceCurrency = movedTo.currency;
   }
 
   await organizations.updateOne({ _id: organization._id }, { $set: { subscription: next } });
+  // An upgrade or downgrade that came from Stripe has to move the switches for
+  // the same reason one made by hand does; otherwise the paid boundary only
+  // holds when a person remembers to apply it.
+  if (movedTo) await applyPlanFeatures(organization._id, movedTo.features);
   try {
     await events.insertOne({ _id: update.eventId, customerId: update.customerId, outcome: "applied", receivedAt: new Date(), type: update.type });
   } catch (error) {
@@ -923,6 +940,7 @@ export async function applyStripeSubscription(update: StripeSubscriptionUpdate):
       fromStatus: current.status,
       toPlan: next.planKey,
       toStatus: next.status,
+      ...(movedTo ? { featuresApplied: movedTo.features.join(",") } : {}),
     },
     targetId: organization._id.toHexString(),
     targetType: "workspace",
@@ -976,7 +994,9 @@ export async function applyStripeCheckout(update: StripeCheckoutUpdate): Promise
     status: "trialing",
   };
   if (update.subscriptionId) next.externalSubscriptionId = update.subscriptionId;
+  const planChanged = plan.key !== organization.subscription?.planKey;
   await organizations.updateOne({ _id: organization._id }, { $set: { subscription: next } });
+  if (planChanged) await applyPlanFeatures(organization._id, plan.features);
   try {
     await events.insertOne({ _id: update.eventId, customerId: update.customerId, outcome: "applied", receivedAt: new Date(), type: update.type });
   } catch (error) {
@@ -987,7 +1007,10 @@ export async function applyStripeCheckout(update: StripeCheckoutUpdate): Promise
     action: "STRIPE_SUBSCRIPTION_SYNCED",
     actorId: organization._id,
     actorKind: "legacyUser",
-    metadata: { eventId: update.eventId, fromStatus: organization.subscription?.status ?? "active", toPlan: plan.key, toStatus: "trialing" },
+    metadata: {
+      eventId: update.eventId, fromStatus: organization.subscription?.status ?? "active", toPlan: plan.key, toStatus: "trialing",
+      ...(planChanged ? { featuresApplied: plan.features.join(",") } : {}),
+    },
     targetId: organization._id.toHexString(),
     targetType: "workspace",
   });

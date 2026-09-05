@@ -59,9 +59,14 @@ export async function GET(request: Request) {
   try {
     const user = await getCurrentUser();
     if (!user) return Response.json({ message: "請先登入。" }, { status: 401 });
-    if (!await canUseWorkspaceFeature(user, "accounting")) {
-      return Response.json({ message: "此工作區目前無法使用記帳功能。" }, { status: 403 });
-    }
+    // Two gates, because they answer different questions: whether this company
+    // keeps books at all, and whether its plan lets it take the data out.
+    const [canRead, canExport] = await Promise.all([
+      canUseWorkspaceFeature(user, "accounting"),
+      canUseWorkspaceFeature(user, "exports"),
+    ]);
+    if (!canRead) return Response.json({ message: "此工作區目前無法使用記帳功能。" }, { status: 403 });
+    if (!canExport) return Response.json({ message: "此工作區目前無法使用匯出功能。" }, { status: 403 });
 
     const { searchParams } = new URL(request.url);
     const startDate = searchParams.get("startDate");

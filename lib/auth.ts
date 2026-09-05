@@ -7,7 +7,7 @@ import { cookies } from "next/headers";
 import { getDatabase } from "@/lib/mongodb";
 import { defaultReceiptTemplate, normalizeUploadedSealLayout, type ReceiptTemplate } from "@/lib/receipt-template";
 import type { PlanKey, SubscriptionStatus } from "@/lib/subscription";
-import { defaultWorkspaceFeatures, readWorkspaceFeatures, type WorkspaceFeatures } from "@/lib/workspace-features";
+import { defaultWorkspaceFeatures, noWorkspaceFeatures, readWorkspaceFeatures, type WorkspaceFeatures } from "@/lib/workspace-features";
 
 const SESSION_COOKIE = "receipt_session";
 const SESSION_DURATION_MS = 1000 * 60 * 60 * 24 * 30;
@@ -184,7 +184,7 @@ async function toAppUser(user: UserDocument & { _id: ObjectId }): Promise<AppUse
   // A suspended workspace can use nothing, so the session reports every feature
   // as unavailable rather than relying on each page to re-check the status.
   const features = organization.status === "suspended"
-    ? { accounting: false, invoices: false, quotations: false, receipts: false }
+    ? noWorkspaceFeatures()
     : await readWorkspaceFeatures(membership.organizationId).catch(() => defaultWorkspaceFeatures());
   return {
     email: user.email, features, id: user._id.toHexString(), mustChangePassword: user.mustChangePassword === true, name: user.name,

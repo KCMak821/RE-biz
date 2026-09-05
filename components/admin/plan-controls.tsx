@@ -162,7 +162,7 @@ function PlanFields({
             />
             <div>
               <strong>{featureLabel(key)}</strong>
-              <span>列在這個方案裡。實際能不能用，仍由每間公司的功能開關決定。</span>
+              <span>列在這個方案裡。公司換到這個方案時，功能開關會照這裡重設；之後仍可為個別公司單獨調整。</span>
             </div>
           </label>
         ))}

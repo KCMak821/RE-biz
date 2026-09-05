@@ -26,7 +26,7 @@ const emptyReport: FinancialReportResponse = {
 };
 
 export function FinancialReportView() {
-  const { currency } = useWorkspace();
+  const { currency, features } = useWorkspace();
   const [startDate, setStartDate] = useState(currentMonthStart);
   const [endDate, setEndDate] = useState(today);
   const [appliedPeriod, setAppliedPeriod] = useState({ startDate: currentMonthStart(), endDate: today() });
@@ -118,7 +118,7 @@ export function FinancialReportView() {
     <div className="page">
       <PageHeader
         description="按期間查看已認列的收入、支出與淨額。收入包括已確認收款的收據和手動收入；待收款收據不會提前列入。"
-        secondaryActions={blocked ? undefined : (
+        secondaryActions={blocked || !features.exports ? undefined : (
           <Button
             disabled={loading}
             icon={<Download aria-hidden="true" size={15} />}

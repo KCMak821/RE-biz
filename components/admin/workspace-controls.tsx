@@ -9,11 +9,13 @@ import { StatusBadge } from "@/components/app/status-badge";
 import { notify } from "@/components/app/toast";
 import { request } from "@/lib/api";
 import { featureLabel } from "@/lib/status";
+import type { WorkspaceFeatureKey } from "@/lib/workspace-feature-keys";
 
-type Feature = { enabled: boolean; featureKey: "receipts" | "accounting" | "quotations" | "invoices" };
+type Feature = { enabled: boolean; featureKey: WorkspaceFeatureKey };
 
 const featureConsequences: Record<Feature["featureKey"], string> = {
   accounting: "成員將無法查看或新增收支紀錄，餘額也不會再顯示。",
+  exports: "成員將無法把報表或紀錄匯出成檔案下載，畫面上仍然看得到。",
   invoices: "成員將無法查看、建立或發送請款單。",
   quotations: "成員將無法查看或建立報價單、客戶與商品資料。",
   receipts: "成員將無法開立新收據，也看不到既有收據。",

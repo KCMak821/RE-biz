@@ -6,11 +6,18 @@
  * import pulls in the whole module graph, and the MongoDB driver's Node
  * built-ins do not resolve in a browser bundle.
  */
-export const workspaceFeatureKeys = ["receipts", "accounting", "quotations", "invoices"] as const;
+export const workspaceFeatureKeys = ["receipts", "accounting", "quotations", "invoices", "exports"] as const;
 export type WorkspaceFeatureKey = (typeof workspaceFeatureKeys)[number];
 export type WorkspaceFeatures = Record<WorkspaceFeatureKey, boolean>;
 
 /** Features default to on: a workspace with no rows has everything available. */
 export function defaultWorkspaceFeatures(): WorkspaceFeatures {
-  return { accounting: true, invoices: true, quotations: true, receipts: true };
+  return { accounting: true, exports: true, invoices: true, quotations: true, receipts: true };
+}
+
+/** Everything off — what a suspended workspace can do. Derived, so a new key is covered. */
+export function noWorkspaceFeatures(): WorkspaceFeatures {
+  const features = defaultWorkspaceFeatures();
+  for (const key of workspaceFeatureKeys) features[key] = false;
+  return features;
 }

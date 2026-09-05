@@ -108,6 +108,7 @@ export function roleLabel(role: string | undefined | null) {
 
 export const featureLabels = {
   accounting: "收支紀錄",
+  exports: "匯出下載",
   invoices: "請款單",
   quotations: "報價單",
   receipts: "收據",

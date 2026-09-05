@@ -69,11 +69,12 @@ export function expiryState(value: string | null | undefined, now: Date = new Da
 /**
  * Where a workspace's feature switches disagree with what its plan includes.
  *
- * The two are deliberately independent — a plan records what is paid for, the
- * switches decide what works — so drift is normal and often intentional (a
- * goodwill gesture, a trial of one feature). It is worth showing rather than
- * correcting: before allowances can be enforced, you want to know how far the
- * plans on paper have drifted from what customers actually have.
+ * Moving a company onto another plan resets its switches to that plan, so a
+ * workspace leaves a plan change with no drift at all. What remains is drift
+ * introduced afterwards and on purpose — a goodwill gesture, a trial of one
+ * feature — plus every workspace whose plan has not changed since a feature was
+ * added to the vocabulary, which is exactly the list worth looking at. It is
+ * shown rather than corrected: an exception someone made by hand is not a bug.
  */
 export type PlanDrift = {
   /** Switched on although the plan does not include it. */
