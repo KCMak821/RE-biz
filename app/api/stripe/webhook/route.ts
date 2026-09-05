@@ -1,5 +1,5 @@
-import { applyStripeSubscription, recordIgnoredStripeEvent } from "@/lib/platform-admin";
-import { readStripeEnvelope, readStripeEvent, verifyStripeSignature } from "@/lib/stripe-webhook";
+import { applyStripeCheckout, applyStripeSubscription, recordIgnoredStripeEvent } from "@/lib/platform-admin";
+import { readStripeCheckoutEvent, readStripeEnvelope, readStripeEvent, verifyStripeSignature } from "@/lib/stripe-webhook";
 
 export const runtime = "nodejs";
 /** The raw body is what Stripe signed, so it must not be cached or rewritten. */
@@ -40,6 +40,15 @@ export async function POST(request: Request) {
     event = JSON.parse(payload);
   } catch {
     return Response.json({ message: "Invalid payload." }, { status: 400 });
+  }
+
+  const checkout = readStripeCheckoutEvent(event);
+  if (checkout) {
+    try {
+      return Response.json({ outcome: await applyStripeCheckout(checkout) });
+    } catch {
+      return Response.json({ message: "Could not record the Checkout session." }, { status: 503 });
+    }
   }
 
   const update = readStripeEvent(event);

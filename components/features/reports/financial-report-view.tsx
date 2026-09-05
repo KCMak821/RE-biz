@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowDownRight, ArrowUpRight, ReceiptText } from "lucide-react";
+import { ArrowDownRight, ArrowUpRight, Download, ReceiptText } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 
 import { Button } from "@/components/app/button";
@@ -34,6 +34,7 @@ export function FinancialReportView() {
   const [page, setPage] = useState(1);
   const [report, setReport] = useState<FinancialReportResponse>(emptyReport);
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
   const [blocked, setBlocked] = useState<string | null>(null);
   const [error, setError] = useState("");
 
@@ -60,6 +61,37 @@ export function FinancialReportView() {
     setPage(1);
   }
 
+  /**
+   * The workbook is a file, not JSON, so this bypasses the shared `request`
+   * helper. It exports the period that is currently on screen — the whole
+   * period, not the visible page, and both sides of the ledger regardless of
+   * the 顯示項目 filter, because a 損益表 with one side missing would not add up.
+   */
+  async function exportWorkbook() {
+    setExporting(true);
+    setError("");
+    try {
+      const params = new URLSearchParams(appliedPeriod).toString();
+      const response = await fetch(`/api/reports/financial/export?${params}`, { cache: "no-store" });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(typeof data?.message === "string" ? data.message : "無法匯出財務報表。");
+      }
+      const url = URL.createObjectURL(await response.blob());
+      const link = document.createElement("a");
+      link.download = `財務報表_${appliedPeriod.startDate}_${appliedPeriod.endDate}.xlsx`;
+      link.href = url;
+      document.body.append(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "無法匯出財務報表。");
+    } finally {
+      setExporting(false);
+    }
+  }
+
   const columns: Column<LedgerEntry>[] = [
     {
       card: "status", header: "收支", key: "type", width: "110px",
@@ -84,7 +116,21 @@ export function FinancialReportView() {
 
   return (
     <div className="page">
-      <PageHeader description="按期間查看已認列的收入、支出與淨額。收入包括已確認收款的收據和手動收入；待收款收據不會提前列入。" title="財務報表" />
+      <PageHeader
+        description="按期間查看已認列的收入、支出與淨額。收入包括已確認收款的收據和手動收入；待收款收據不會提前列入。"
+        secondaryActions={blocked ? undefined : (
+          <Button
+            disabled={loading}
+            icon={<Download aria-hidden="true" size={15} />}
+            onClick={() => void exportWorkbook()}
+            pending={exporting}
+            pendingLabel="匯出中…"
+          >
+            匯出 Excel
+          </Button>
+        )}
+        title="財務報表"
+      />
       {blocked ? <Card><FeatureDisabled feature="財務報表" message={blocked} /></Card> : <>
         <Card description="預設為本月；可調整日期後重新產生收支匯總。" title="報表期間">
           <form className="form" onSubmit={submit}>

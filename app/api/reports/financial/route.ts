@@ -4,6 +4,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { getDatabase } from "@/lib/mongodb";
 import { canUseWorkspaceFeature } from "@/lib/platform-admin";
 import { readPageParams, resolvePage } from "@/lib/query";
+import { isIsoDate, ledgerUnionPipeline, periodMatchers } from "@/lib/reports/financial";
 
 export const runtime = "nodejs";
 
@@ -17,10 +18,9 @@ type ReportRow = {
   type: "IN" | "OUT";
 };
 
+/** An absent bound means "no limit on this side", so `null` stays valid here. */
 function isDate(value: string | null) {
-  if (value === null || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return value === null;
-  const parsed = new Date(`${value}T00:00:00.000Z`);
-  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+  return value === null || isIsoDate(value);
 }
 
 /** A period report shares the ledger's recognition rules: confirmed receipts
@@ -45,19 +45,15 @@ export async function GET(request: Request) {
     }
 
     const organizationId = new ObjectId(user.organization.id);
-    const dateFilter: Record<string, string> = {};
-    if (startDate) dateFilter.$gte = startDate;
-    if (endDate) dateFilter.$lte = endDate;
-    const periodMatch = Object.keys(dateFilter).length ? { date: dateFilter } : {};
-    const receiptPeriodMatch = Object.keys(dateFilter).length ? { issueDate: dateFilter } : {};
+    const matchers = periodMatchers(organizationId, startDate, endDate);
     const database = await getDatabase();
     const [manualTotals, receiptTotals] = await Promise.all([
       database.collection("ledgerEntries").aggregate<{ _id: "IN" | "OUT"; amount: number; count: number }>([
-        { $match: { organizationId, ...periodMatch } },
+        { $match: matchers.manual },
         { $group: { _id: "$type", amount: { $sum: "$amount" }, count: { $sum: 1 } } },
       ]).toArray(),
       database.collection("receipts").aggregate<{ amount: number; count: number }>([
-        { $match: { organizationId, paymentStatus: { $ne: "pending" }, ...receiptPeriodMatch } },
+        { $match: matchers.receipt },
         { $group: { _id: null, amount: { $sum: "$amount" }, count: { $sum: 1 } } },
       ]).toArray(),
     ]);
@@ -68,19 +64,7 @@ export async function GET(request: Request) {
     const receiptCount = receiptTotals[0]?.count ?? 0;
     const income = manualIncome + receiptIncome;
 
-    const manualMatch: Record<string, unknown> = { organizationId, ...periodMatch };
-    if (type !== "all") manualMatch.type = type;
-    const receiptMatch: Record<string, unknown> = { organizationId, paymentStatus: { $ne: "pending" }, ...receiptPeriodMatch };
-    const detailPipeline: Record<string, unknown>[] = [
-      { $match: manualMatch },
-      { $project: { amount: 1, createdAt: 1, date: 1, description: 1, source: { $literal: "manual" }, type: 1 } },
-    ];
-    if (type !== "OUT") detailPipeline.push({
-      $unionWith: { coll: "receipts", pipeline: [
-        { $match: receiptMatch },
-        { $project: { amount: 1, createdAt: 1, date: "$issueDate", description: { $concat: ["$receiptNumber", " · ", "$payerName"] }, source: { $literal: "receipt" }, type: { $literal: "IN" } } },
-      ] },
-    });
+    const detailPipeline = ledgerUnionPipeline(matchers, type);
     const { page: requestedPage, pageSize } = readPageParams(searchParams);
     const [counted] = await database.collection("ledgerEntries").aggregate<{ value: number }>([...detailPipeline, { $count: "value" }]).toArray();
     const { page, skip, total, totalPages } = resolvePage({ page: requestedPage, pageSize, total: counted?.value ?? 0 });

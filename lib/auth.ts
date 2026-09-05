@@ -46,6 +46,15 @@ export type AppUser = {
     role: MemberRole;
     sealUpdatedAt?: string;
     status: WorkspaceStatus;
+    /** Safe subscription facts used by the workspace billing screen. */
+    subscription: {
+      currentPeriodEnd: string | null;
+      externalCustomerId: string | null;
+      externalSubscriptionId: string | null;
+      planKey: PlanKey | null;
+      status: SubscriptionStatus | null;
+      trialEndsAt: string | null;
+    };
     timeZone: string;
   };
 };
@@ -183,6 +192,14 @@ async function toAppUser(user: UserDocument & { _id: ObjectId }): Promise<AppUse
       address: organization.address ?? "", bankDetails: organization.bankDetails ?? "", businessRegistration: organization.businessRegistration ?? "", contact: organization.contact ?? "", currency: organization.currency ?? "HKD", email: organization.email ?? "",
       hasLogo: Boolean(organization.logo), hasSealImage: Boolean(organization.seal), id: organization._id.toHexString(), name: organization.name, phone: organization.phone ?? "", receiptTemplate: normalizeUploadedSealLayout({ ...defaultReceiptTemplate, ...organization.receiptTemplate }), role: membership.role, sealUpdatedAt: organization.seal?.updatedAt.toISOString(), timeZone: organization.timeZone ?? "Asia/Hong_Kong",
       status: organization.status ?? "active",
+      subscription: {
+        currentPeriodEnd: organization.subscription?.currentPeriodEnd?.toISOString() ?? null,
+        externalCustomerId: organization.subscription?.externalCustomerId ?? null,
+        externalSubscriptionId: organization.subscription?.externalSubscriptionId ?? null,
+        planKey: organization.subscription?.planKey ?? null,
+        status: organization.subscription?.status ?? null,
+        trialEndsAt: organization.subscription?.trialEndsAt?.toISOString() ?? null,
+      },
     },
   };
 }

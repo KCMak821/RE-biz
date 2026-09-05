@@ -2,6 +2,7 @@ import type { WorkspaceFeatureKey, WorkspaceFeatures } from "@/lib/workspace-fea
 import {
   BookOpenText,
   Building2,
+  CreditCard,
   FileSignature,
   FileText,
   ChartNoAxesCombined,
@@ -133,6 +134,13 @@ export const navigation: NavGroup[] = [
         href: "/settings/members",
         icon: UsersRound,
         label: "成員與權限",
+      },
+      {
+        adminOnly: true,
+        description: "管理試用、訂閱、付款方式與帳單。",
+        href: "/settings/billing",
+        icon: CreditCard,
+        label: "方案與帳單",
       },
       {
         description: "變更你自己的登入密碼。",

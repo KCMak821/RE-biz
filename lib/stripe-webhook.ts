@@ -105,6 +105,16 @@ export type StripeSubscriptionUpdate = {
   type: string;
 };
 
+/** The completed Checkout Session securely ties a Stripe customer to a workspace. */
+export type StripeCheckoutUpdate = {
+  customerId: string;
+  eventId: string;
+  planKey: string;
+  subscriptionId: string | null;
+  type: string;
+  workspaceId: string;
+};
+
 /**
  * The identity of any verified event, including the ones nothing acts on.
  *
@@ -128,6 +138,11 @@ type StripeEvent = {
 
 function asString(value: unknown) {
   return typeof value === "string" && value ? value : null;
+}
+
+function metadataString(value: unknown, key: string) {
+  if (typeof value !== "object" || !value) return null;
+  return asString((value as Record<string, unknown>)[key]);
 }
 
 /** Unix seconds to an ISO date, or null when Stripe did not send one. */
@@ -181,4 +196,20 @@ export function readStripeEvent(event: unknown): StripeSubscriptionUpdate | null
   }
 
   return null;
+}
+
+/** Checkout carries our workspace metadata; subscription events supply dates. */
+export function readStripeCheckoutEvent(event: unknown): StripeCheckoutUpdate | null {
+  if (typeof event !== "object" || !event) return null;
+  const { data, id, type } = event as StripeEvent;
+  if (type !== "checkout.session.completed") return null;
+  const object = data?.object;
+  const eventId = asString(id);
+  if (!eventId || !object) return null;
+
+  const workspaceId = asString(object.client_reference_id) ?? metadataString(object.metadata, "workspaceId");
+  const planKey = metadataString(object.metadata, "planKey");
+  const customerId = asString(object.customer);
+  if (!workspaceId || !planKey || !customerId) return null;
+  return { customerId, eventId, planKey, subscriptionId: asString(object.subscription), type, workspaceId };
 }

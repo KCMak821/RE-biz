@@ -1,8 +1,8 @@
 import { ObjectId, type ClientSession, type Filter } from "mongodb";
 
 import { type AccountStatus, type OrganizationDocument, type UserDocument, type WorkspaceStatus, type WorkspaceSubscriptionDocument } from "@/lib/auth";
-import { isValidPlanKey, listPlans, plansByKey, plansCollection, resolvePlan, type Plan, type PlanAllowances } from "@/lib/plans";
-import { type StripeEventEnvelope, type StripeSubscriptionUpdate } from "@/lib/stripe-webhook";
+import { getPlan, isValidPlanKey, listPlans, plansByKey, plansCollection, resolvePlan, type Plan, type PlanAllowances } from "@/lib/plans";
+import { type StripeCheckoutUpdate, type StripeEventEnvelope, type StripeSubscriptionUpdate } from "@/lib/stripe-webhook";
 import {
   expiryState, hasDrift, isSubscriptionStatus, planDrift, subscriptionStatuses,
   type PlanDrift, type PlanKey, type SubscriptionStatus, type WorkspaceSubscription,
@@ -866,25 +866,21 @@ export async function applyStripeSubscription(update: StripeSubscriptionUpdate):
   const database = await getDatabase();
   const events = await stripeEventsCollection();
 
-  // Stripe retries until it gets a 2xx, so the same event can arrive twice.
-  try {
-    await events.insertOne({
-      _id: update.eventId,
-      customerId: update.customerId,
-      outcome: "applied",
-      receivedAt: new Date(),
-      type: update.type,
-    });
-  } catch (error) {
-    if (typeof error === "object" && error && "code" in error && error.code === 11000) return "duplicate";
-    throw error;
-  }
+  // A successfully applied event is final. Do not claim an event is complete
+  // before the organization update succeeds: otherwise a transient Mongo error
+  // would make Stripe's retry a harmless "duplicate" and lose the update.
+  if (await events.findOne({ _id: update.eventId }, { projection: { _id: 1 } })) return "duplicate";
 
   const organizations = database.collection<OrganizationDocument>("organizations");
   const organization = await organizations.findOne({ "subscription.externalCustomerId": update.customerId });
   if (!organization) {
-    await events.updateOne({ _id: update.eventId }, { $set: { outcome: "no_match" } });
-    return "no_match";
+    try {
+      await events.insertOne({ _id: update.eventId, customerId: update.customerId, outcome: "no_match", receivedAt: new Date(), type: update.type });
+      return "no_match";
+    } catch (error) {
+      if (typeof error === "object" && error && "code" in error && error.code === 11000) return "duplicate";
+      throw error;
+    }
   }
 
   const plans = await plansByKey();
@@ -910,6 +906,12 @@ export async function applyStripeSubscription(update: StripeSubscriptionUpdate):
   }
 
   await organizations.updateOne({ _id: organization._id }, { $set: { subscription: next } });
+  try {
+    await events.insertOne({ _id: update.eventId, customerId: update.customerId, outcome: "applied", receivedAt: new Date(), type: update.type });
+  } catch (error) {
+    if (typeof error === "object" && error && "code" in error && error.code === 11000) return "duplicate";
+    throw error;
+  }
   await writePlatformAuditLogBestEffort({
     action: "STRIPE_SUBSCRIPTION_SYNCED",
     // Stripe is the actor here, not a person; the organization's own id stands
@@ -922,6 +924,70 @@ export async function applyStripeSubscription(update: StripeSubscriptionUpdate):
       toPlan: next.planKey,
       toStatus: next.status,
     },
+    targetId: organization._id.toHexString(),
+    targetType: "workspace",
+  });
+  return "applied";
+}
+
+/**
+ * Stores the customer and subscription that Checkout created against the exact
+ * workspace carried in signed Checkout metadata. Subscription events then fill
+ * in Stripe's authoritative dates and Price mapping.
+ */
+export async function applyStripeCheckout(update: StripeCheckoutUpdate): Promise<StripeSyncOutcome> {
+  if (!ObjectId.isValid(update.workspaceId)) return "no_match";
+  await preparePlatformAdminCollections();
+  const database = await getDatabase();
+  const events = await stripeEventsCollection();
+  if (await events.findOne({ _id: update.eventId }, { projection: { _id: 1 } })) return "duplicate";
+
+  const plan = await getPlan(update.planKey);
+  const organizations = database.collection<OrganizationDocument>("organizations");
+  const organization = await organizations.findOne({ _id: new ObjectId(update.workspaceId) });
+  if (!organization || !plan || plan.archived) {
+    try {
+      await events.insertOne({ _id: update.eventId, customerId: update.customerId, outcome: "no_match", receivedAt: new Date(), type: update.type });
+      return "no_match";
+    } catch (error) {
+      if (typeof error === "object" && error && "code" in error && error.code === 11000) return "duplicate";
+      throw error;
+    }
+  }
+
+  const knownCustomer = organization.subscription?.externalCustomerId;
+  if (knownCustomer && knownCustomer !== update.customerId) {
+    try {
+      await events.insertOne({ _id: update.eventId, customerId: update.customerId, outcome: "ignored", receivedAt: new Date(), type: update.type });
+      return "ignored";
+    } catch (error) {
+      if (typeof error === "object" && error && "code" in error && error.code === 11000) return "duplicate";
+      throw error;
+    }
+  }
+
+  const next: WorkspaceSubscriptionDocument = {
+    ...organization.subscription,
+    externalCustomerId: update.customerId,
+    planKey: plan.key,
+    priceCents: plan.priceCents,
+    priceCurrency: plan.currency,
+    startedAt: organization.subscription?.startedAt ?? organization.createdAt,
+    status: "trialing",
+  };
+  if (update.subscriptionId) next.externalSubscriptionId = update.subscriptionId;
+  await organizations.updateOne({ _id: organization._id }, { $set: { subscription: next } });
+  try {
+    await events.insertOne({ _id: update.eventId, customerId: update.customerId, outcome: "applied", receivedAt: new Date(), type: update.type });
+  } catch (error) {
+    if (typeof error === "object" && error && "code" in error && error.code === 11000) return "duplicate";
+    throw error;
+  }
+  await writePlatformAuditLogBestEffort({
+    action: "STRIPE_SUBSCRIPTION_SYNCED",
+    actorId: organization._id,
+    actorKind: "legacyUser",
+    metadata: { eventId: update.eventId, fromStatus: organization.subscription?.status ?? "active", toPlan: plan.key, toStatus: "trialing" },
     targetId: organization._id.toHexString(),
     targetType: "workspace",
   });
